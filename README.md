@@ -2,7 +2,7 @@
 ## Team:
 - Bartek
 - Tomek
-- Przemek?
+- Przemek
 ## Description
 
 ## Goals
