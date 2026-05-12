@@ -67,25 +67,25 @@ INCLUDES = -I$(INC_DIR)
 all: $(NAME)
 
 $(NAME): $(OBJS)
-    $(CXX) $(CXXFLAGS) $(OBJS) -o $(NAME)
+	$(CXX) $(CXXFLAGS) $(OBJS) -o $(NAME)
 
 # =========================
 # Object rule
 # =========================
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-    mkdir -p $(dir $@)
-    $(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # =========================
 # Clean rules
 # =========================
 
 clean:
-    $(RM) -r $(OBJ_DIR)
+	$(RM) -r $(OBJ_DIR)
 
 fclean: clean
-    $(RM) $(NAME)
+	$(RM) $(NAME)
 
 re: fclean all
 
