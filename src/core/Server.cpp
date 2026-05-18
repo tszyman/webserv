@@ -1,6 +1,6 @@
 #include "core/Server.hpp"
 #include "network/EventLoop.hpp"
-#include <stdio.h>
+#include <iostream>
 
 Server::Server()
 {   
@@ -8,16 +8,16 @@ Server::Server()
 
 bool Server::loadConfig(int argc, char **argv)
 {
-    printf("Loading config...\n");
+    std::cout << "Loading config..." << std::endl;
     (void)argc;
     (void)argv;
-    printf("Config loaded\n");
+    std::cout << "Config loaded" << std::endl;
     return true;
 }
 
 void Server::run()
 {
-    printf("Server started\n");
+    std::cout << "Server started" << std::endl;
     EventLoop loop;
     loop.run();
 }
