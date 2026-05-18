@@ -1,5 +1,6 @@
 #include "network/EventLoop.hpp"
-#include <stdio.h>
+#include "parser/RequestParser.hpp"
+#include <iostream>
 
 EventLoop::EventLoop()
 {   
@@ -7,7 +8,15 @@ EventLoop::EventLoop()
 
 void EventLoop::run()
 {
-    printf("Event loop started\n");
+    RequestParser parser;
+    bool ok;
+
+    std::cout << "Event loop started" << std::endl;
+    
+    // TEST parseRequestLine
+    ok = parser.parseRequestLine("GET /index.html HTTP/1.1");
+    std::cout << "parseRequestLine result: " << ok << std::endl;
+
     while(1)
     {
         // placeholder
