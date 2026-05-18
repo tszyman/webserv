@@ -1,4 +1,4 @@
-class ReuestParser
+class RequestParser
 {
     public:
         RequestParser();
