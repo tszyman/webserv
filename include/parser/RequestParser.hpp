@@ -8,6 +8,7 @@ class RequestParser
         RequestParser();
         void feed(const std::string &data);
         bool parseRequestLine(const std::string &line);
+		bool parseRequestMap(const std::string &line);
 
         bool isComplete() const;
         const std::string &getMethod() const;
