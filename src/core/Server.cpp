@@ -11,7 +11,7 @@ bool Server::loadConfig(int argc, char **argv)
     std::cout << "Loading config..." << std::endl;
     (void)argc;
     (void)argv;
-    std::cout << "Config loaded" << std::endl;
+    std::cout << "Config loaded." << std::endl;
     return true;
 }
 
