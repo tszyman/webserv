@@ -1,5 +1,6 @@
 #include "network/EventLoop.hpp"
-#include <stdio.h>
+#include "parser/RequestParser.hpp"
+#include <iostream>
 
 EventLoop::EventLoop()
 {   
@@ -7,7 +8,8 @@ EventLoop::EventLoop()
 
 void EventLoop::run()
 {
-    printf("Event loop started\n");
+    std::cout << "Event loop started" << std::endl;
+
     while(1)
     {
         // placeholder
