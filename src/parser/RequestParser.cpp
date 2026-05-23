@@ -2,7 +2,7 @@
 #include <string>
 
 RequestParser::RequestParser()
-{   
+{
 }
 std::string RequestParser::trim(const std::string &str)
 {
@@ -12,11 +12,11 @@ std::string RequestParser::trim(const std::string &str)
 	start = 0;
 	while (start < str.size() && (str[start] == ' ' || str[start] == '\t'))
 		start++;
-	
+
 	end = str.size();
 	while (end > start && (str[end-1] == ' ' || str[end - 1] == '\t'))
 		end--;
-	
+
 	return str.substr(start, end - start);
 }
 
@@ -54,20 +54,32 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 	std::string::size_type pos;
 	std::string key;
 	std::string value;
+	std::sting::size_type i;
 
 	if(line.empty())
 		return true;
-	
+
 	pos = line.find(':');
 	if(pos == std::string::npos)
 		return false;
-	
+
+	if (line.find(':', pos + 1) != std::string::npos)
+		return false;
+
 	key = trim(line.substr(0, pos));
 	value = trim(line.substr(pos + 1));
 
 	if (key.empty())
 		return false;
-	
+
+	i = 0;
+	while (i < key_size())
+	{
+		if (key[i] == ' ' || key[i] == '\t')
+			return false;
+		i++;
+	}
+
 	_headers[key] = value;
 	return true;
 }
