@@ -75,7 +75,7 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 	i = 0;
 	while(i < key.size())
 	{
-		if (key[i] == ' ' || key[i] == '\t')
+		if(key[i] == ' ' || key[i] == '\t')
 			return false;
 		i++;
 	}
