@@ -54,7 +54,7 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 	std::string::size_type pos;
 	std::string key;
 	std::string value;
-	std::sting::size_type i;
+	std::string::size_type i;
 
 	if(line.empty())
 		return true;
@@ -73,7 +73,7 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 		return false;
 
 	i = 0;
-	while (i < key_size())
+	while (i < key.size())
 	{
 		if (key[i] == ' ' || key[i] == '\t')
 			return false;

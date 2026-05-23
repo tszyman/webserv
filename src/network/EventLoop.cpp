@@ -24,7 +24,7 @@ void EventLoop::run()
 	std::cout << "Parsed: " << ok << std::endl;
 
 	std::cout << "Headers parsed: " << parser.getHeaders().size() << std::endl;
-	
+
 	while (1)
 	{
 		// placeholder
