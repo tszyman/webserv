@@ -1,5 +1,4 @@
 #include "network/EventLoop.hpp"
-#include "parser/RequestParser.hpp"
 #include <iostream>
 
 EventLoop::EventLoop()
