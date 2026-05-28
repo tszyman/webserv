@@ -32,13 +32,18 @@ void SocketEngine::init()
         throw std::runtime_error("Error: sersockopt() failed");
     }
 
-    // 3. Set socket to non-blocking mode (Non-blocking I/O)
+    // 3. Set socket to non-blocking mode and close-on-exec
     if (fcntl(_server_fd, F_SETFL, O_NONBLOCK) == -1)
     {
-        throw std::runtime_error("Error: fcntl() failed");
+        throw std::runtime_error("Error: fcntl(O_NONBLOCK) failed");
     }
 
-    // 4. BNind socket to address and port
+    if (fcntl(_server_fd, F_SETFD, FD_CLOEXEC) == -1)
+    {
+        throw std::runtime_error("Error: fcntl(FD_CLOEXEC) failed");
+    }
+
+    // 4. Bind socket to address and port
     if (bind(_server_fd, (struct sockaddr*)&_address, sizeof(_address)) == -1)
     {
         throw std::runtime_error("Error: bind() failed");
@@ -51,4 +56,36 @@ void SocketEngine::init()
     }
 
     std::cout << "[SocketEngine] Server started and listening on port " << _port << "(FD: " << _server_fd << ")" << std::endl; 
+}
+
+Connection* SocketEngine::acceptConnection()
+{
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+
+    //Accept the incoming connection
+    int client_fd = accept(_server_fd, (struct sockaddr*)&client_addr, &addr_len);
+    if (client_fd == -1)
+    {
+        return NULL;
+    }
+    
+    if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1)
+    {
+        close(client_fd);
+        return NULL;
+    }
+    
+    if (fcntl(client_fd, F_SETFD, FD_CLOEXEC) == -1)
+    {
+        close(client_fd);
+        return NULL;
+    }
+
+    return new Connection(client_fd);
+}
+
+int SocketEngine::getFd() const
+{
+    return _server_fd;
 }
