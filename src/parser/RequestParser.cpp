@@ -110,7 +110,7 @@ RequestParser::ParserState RequestParser::getState() const
 void RequestParser::determineBodyType()
 {
 	std::map<std::string, std::string>::const_iterator it = _headers.find("Transfer-Encoding");
-	if(it != _headers.end() && it->second == "chunked" != std::string::npos)
+	if(it != _headers.end() && it->second.find("chunked") != std::string::npos)
 	{
 		_bodyType = BODY_CHUNKED;
 		return;
