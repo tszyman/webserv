@@ -197,13 +197,26 @@ void RequestParser::processBody(const char* data, size_t length)
 				if(_chunkHexBuffer.size() >= 2 && _chunkHexBuffer.substr(_chunkHexBuffer.size() - 2) == "\r\n")
 				{
 					std::string size_line = _chunkHexBuffer.substr(0, _chunkHexBuffer.size() - 2);
-					_currentChunkSize = static_cast<size_t>(std::strtol(size_line.c_str(), NULL, 16));
-					_chunkHexBuffer.clear();
-					_bytesRead = 0;
-					if(_currentChunkSize == 0)
-						_state = STATE_COMPLETE;
+					char* endptr;
+					long parsed_size = std::strtol(size_line.c_str(), &endptr, 16);
+					// Validation checks:
+					// 1. endptr == size_line.c_str() means no digits were parsed at all
+					// 2. *endptr != '\0' means there were training invalid chars (like 'Z')
+					// 3. parsed_size < 0 protects against overflow or negative values
+					if (endptr == size_line.c_str() || *endptr != '\0' || parsed_size < 0)
+					{
+						_state = STATE_ERROR;
+					}
 					else
-						_chunkState = CHUNK_DATA;
+					{
+						_currentChunkSize = static_cast<size_t>(std::strtol(size_line.c_str(), NULL, 16));
+						_chunkHexBuffer.clear();
+						_bytesRead = 0;
+						if(_currentChunkSize == 0)
+							_state = STATE_COMPLETE;
+						else
+							_chunkState = CHUNK_DATA;
+					}
 				}
 			}
 			else if(_chunkState == CHUNK_DATA)
