@@ -3,6 +3,9 @@ import socket
 import sys
 import os
 
+# Tests if features work properly on working server. 
+# Cannot be used until the server listens on a socket.
+
 # Import integration helpers from the main script
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import run_tests

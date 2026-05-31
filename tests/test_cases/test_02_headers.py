@@ -3,29 +3,48 @@ import subprocess
 
 class TestHeaders(unittest.TestCase):
 
-    def run_tester(self, headers_list):
-        """Helper to pass multiple headers to unit_tester"""
-        cmd = ["./unit_tester", "header_line"] + headers_list
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    def run_tester(self, raw_http_payload):
+        """Helper to pass the entire raw HTTP payload into the unit_tester"""
+        res = subprocess.run(
+            ["./unit_tester", raw_http_payload],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
         return res.stdout.strip().split("\n")
 
     def test_valid_headers(self):
-        """Parse well-formed headers into map"""
-        headers = ["Host: localhost", "Content-Type: text/html", "Content-Length: 42"]
-        out = self.run_tester(headers)
+        """Parse well-formed headers into map and verify successful completion"""
+        payload = (
+            "GET / HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        )
+        out = self.run_tester(payload)
         self.assertEqual(out[0], "SUCCESS")
-        self.assertIn("Host: localhost", out)
-        self.assertIn("Content-Type: text/html", out)
-        self.assertIn("Content-Length: 42", out)
+        # Your unit_tester prefixes printed headers with "H-"
+        self.assertIn("H-Host: localhost", out)
+        self.assertIn("H-Content-Type: text/html", out)
+        self.assertIn("H-Content-Length: 0", out)
 
     def test_invalid_header_syntax(self):
         """Reject headers without a colon separator"""
-        headers = ["Host localhost"]
-        out = self.run_tester(headers)
+        payload = (
+            "GET / HTTP/1.1\r\n"
+            "Host localhost\r\n"
+            "\r\n"
+        )
+        out = self.run_tester(payload)
         self.assertEqual(out[0], "FAILED")
 
     def test_spaces_in_key(self):
         """Reject spaces inside the header key before the colon"""
-        headers = ["Bad Key: value"]
-        out = self.run_tester(headers)
+        payload = (
+            "GET / HTTP/1.1\r\n"
+            "Bad Key: value\r\n"
+            "\r\n"
+        )
+        out = self.run_tester(payload)
         self.assertEqual(out[0], "FAILED")
