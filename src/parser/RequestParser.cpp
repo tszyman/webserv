@@ -140,7 +140,7 @@ void RequestParser::feed(const char* data, size_t length)
 		return;
 
 	size_t i = 0;
-	while(i < length && _state != STATE_BODY)
+	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE)
 	{
 		_headerBuffer += data[i];
 		if(_headerBuffer.size() >= 2 && _headerBuffer.substr(_headerBuffer.size() - 2) == "\r\n")
@@ -179,7 +179,7 @@ void RequestParser::processBody(const char* data, size_t length)
 	{
 		size_t bytesToRead = std::min(length, _contentLength - _bytesRead);
 		_body.insert(_body.end(), data, data + bytesToRead);
-		_bytesRead =+ bytesToRead;
+		_bytesRead += bytesToRead;
 		if(_bytesRead >= _contentLength)
 		{
 			_state = STATE_COMPLETE;
@@ -192,11 +192,14 @@ void RequestParser::processBody(const char* data, size_t length)
 		{
 			if(_chunkState == CHUNK_SIZE)
 			{
-				_chunkHexBuffer += data[i++];
+				char c = data[i++];
+				_chunkHexBuffer += c;
 				if(_chunkHexBuffer.size() >= 2 && _chunkHexBuffer.substr(_chunkHexBuffer.size() - 2) == "\r\n")
 				{
-					_currentChunkSize = static_cast<size_t>(std::strtol(_chunkHexBuffer.c_str(), NULL, 16));
+					std::string size_line = _chunkHexBuffer.substr(0, _chunkHexBuffer.size() - 2);
+					_currentChunkSize = static_cast<size_t>(std::strtol(size_line.c_str(), NULL, 16));
 					_chunkHexBuffer.clear();
+					_bytesRead = 0;
 					if(_currentChunkSize == 0)
 						_state = STATE_COMPLETE;
 					else
@@ -205,17 +208,13 @@ void RequestParser::processBody(const char* data, size_t length)
 			}
 			else if(_chunkState == CHUNK_DATA)
 			{
-				size_t chunkBytesLeft = _currentChunkSize - _bytesRead;
-				size_t bytesAvailable = length - 1;
-				size_t bytesToCopy = std::min(chunkBytesLeft, bytesAvailable);
-
-				_body.insert(_body.end(), data + i, data + i + bytesToCopy);
-				i += bytesToCopy;
-				_bytesRead += bytesToCopy;
+				_body.push_back(data[i++]);
+				_bytesRead++;
+				
 				if(_bytesRead >= _currentChunkSize)
 				{
 					_chunkState = CHUNK_CRLF;
-					_bytesRead = 0;
+					_chunkHexBuffer.clear();
 				} 
 			}
 			else if(_chunkState == CHUNK_CRLF)
