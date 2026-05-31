@@ -3,3 +3,5 @@ tester
 webserv_subject.pdf
 obj/
 webserv
+__pycache__
+unit_tester
