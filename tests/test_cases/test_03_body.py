@@ -11,8 +11,6 @@ class TestBodyHandling(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True
         )
-		if not request_line.endswith("\r\n"):
-			request_line += "\r\n"
         return res.stdout.strip().split("\n")
 
     # ==========================================
@@ -76,8 +74,8 @@ class TestBodyHandling(unittest.TestCase):
         out = self.run_tester(payload)
         # Your strtol validation should push the parser to STATE_ERROR
         self.assertEqual(out[0], "FAILED")
-	
-	def test_chunked_fragmented_stream(self):
+
+    def test_chunked_fragmented_stream(self):
         """Valid Chunked: Verify that the parser handles highly fragmented stream input (byte-by-byte feed)"""
         payload = (
             "POST /upload HTTP/1.1\r\n"
