@@ -7,8 +7,6 @@ class TestHeaders(unittest.TestCase):
         """Helper to pass multiple headers to unit_tester"""
         cmd = ["./unit_tester", "header_line"] + headers_list
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-		if not request_line.endswith("\r\n"):
-        	request_line += "\r\n"
         return res.stdout.strip().split("\n")
 
     def test_valid_headers(self):
