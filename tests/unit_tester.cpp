@@ -3,6 +3,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include "network/SocketEngine.hpp"
 
 /* 
 
@@ -41,17 +42,62 @@ void print_parser_result(const RequestParser &parser) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        std::cerr << "Usage: ./unit_tester [raw_http_payload]" << std::endl;
+        std::cerr << "Usage: ./unit_tester [component] [args...]" << std::endl;
         return 1;
     }
 
-    // Combine all arguments into a single raw HTTP payload string
-    std::string raw_payload = argv[1];
-    
-    RequestParser parser;
-    // Feed the raw data directly into your parser stream engine
-    parser.feed(raw_payload.c_str(), raw_payload.length());
+    std::string component = argv[1];
 
-    print_parser_result(parser);
-    return 0;
+    // ==========================================
+    // COMPONENT: REQUEST PARSER
+    // ==========================================
+    if (component == "parser") {
+        if (argc < 3) {
+            std::cerr << "Error: 'parser' requires a payload argument." << std::endl;
+            return 1;
+        }
+        std::string raw_payload = argv[2];
+        RequestParser parser;
+        parser.feed(raw_payload.c_str(), raw_payload.length());
+        print_parser_result(parser);
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: SOCKET ENGINE
+    // ==========================================
+else if (component == "socket") {
+        int port = (argc >= 3) ? std::atoi(argv[2]) : 8080;
+        SocketEngine engine(port); 
+        
+        // FIX: Wrap init() in a try-catch block to handle exceptions properly
+        try {
+            engine.init();
+            std::cout << "SUCCESS_SOCKET_INIT" << std::endl;
+        } 
+        catch (const std::exception& e) {
+            // Log the actual exception message to stderr for debugging
+            std::cerr << "SocketEngine exception caught: " << e.what() << std::endl;
+            // Print the failure token to stdout for the Python tester
+            std::cout << "FAILED_SOCKET_INIT" << std::endl;
+        }
+        catch (...) {
+            // Catch-all for non-standard exceptions
+            std::cerr << "SocketEngine unknown exception thrown." << std::endl;
+            std::cout << "FAILED_SOCKET_INIT" << std::endl;
+        }
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: CONNECTION (Placeholder)
+    // ==========================================
+    else if (component == "connection") {
+        // Implement connection testing logic here later
+        std::cout << "CONNECTION_TEST_PLACEHOLDER" << std::endl;
+        return 0;
+    }
+
+    std::cerr << "Unknown component: " << component << std::endl;
+    return 1;
 }

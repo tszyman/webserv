@@ -44,6 +44,8 @@ def compile_unit_tester():
         "-I../include",
         "unit_tester.cpp",
         "../src/parser/RequestParser.cpp",
+		"../src/network/SocketEngine.cpp",
+		"../src/network/Connection.cpp",
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
