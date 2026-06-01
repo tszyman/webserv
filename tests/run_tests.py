@@ -80,11 +80,11 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"{GREEN}[OK] Main project compiled successfully.{RESET}")
 
-    #tester_compiled, tester_err = compile_unit_tester()
-    #if not tester_compiled:
-    #    print(f"{RED}[FAIL] Unit tester compilation failed!{RESET}\n{tester_err}")
-    #    sys.exit(1)
-    #print(f"{GREEN}[OK] Unit tester tool compiled successfully.{RESET}")
+    tester_compiled, tester_err = compile_unit_tester()
+    if not tester_compiled:
+       print(f"{RED}[FAIL] Unit tester compilation failed!{RESET}\n{tester_err}")
+       sys.exit(1)
+    print(f"{GREEN}[OK] Unit tester tool compiled successfully.{RESET}")
 
     try:
         print(f"\n{YELLOW}=== RUNNING REGRESSION TESTS ==={RESET}\n")
