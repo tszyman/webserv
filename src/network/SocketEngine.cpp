@@ -55,7 +55,7 @@ void SocketEngine::init()
         throw std::runtime_error("Error: listen() failed");
     }
 
-    std::cout << "[SocketEngine] Server started and listening on port " << _port << "(FD: " << _server_fd << ")" << std::endl; 
+    std::cerr << "[SocketEngine] Server started and listening on port " << _port << "(FD: " << _server_fd << ")" << std::endl; 
 }
 
 Connection* SocketEngine::acceptConnection()
