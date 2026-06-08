@@ -46,6 +46,10 @@ def compile_unit_tester():
         "../src/parser/RequestParser.cpp",
 		"../src/network/SocketEngine.cpp",
 		"../src/network/Connection.cpp",
+		"../src/http/StatusCodes.cpp",     # ADDED Przemek tests
+        "../src/http/HttpResponse.cpp",    # ADDED Przemek tests
+        "../src/http/HttpErrorPage.cpp",   # ADDED Przemek tests
+        "../src/http/HttpRequest.cpp",     # ADDED Przemek tests
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

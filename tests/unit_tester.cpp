@@ -4,6 +4,10 @@
 #include <map>
 #include <vector>
 #include "network/SocketEngine.hpp"
+#include "http/StatusCodes.hpp"
+#include "http/HttpResponse.hpp"
+#include "http/HttpErrorPage.hpp"
+#include "http/HttpRequest.hpp"
 
 /* 
 
@@ -85,6 +89,49 @@ else if (component == "socket") {
             // Catch-all for non-standard exceptions
             std::cerr << "SocketEngine unknown exception thrown." << std::endl;
             std::cout << "FAILED_SOCKET_INIT" << std::endl;
+        }
+        return 0;
+    }
+
+	// ==========================================
+    // COMPONENT: HTTP STATUS CODES
+    // ==========================================
+    else if (component == "http_status") {
+        if (argc < 3) return 1;
+        int code = std::atoi(argv[2]);
+        
+        std::cout << "Phrase: " << HttpStatus::reasonPhrase(code) << std::endl;
+        std::cout << "Known: " << (HttpStatus::isKnown(code) ? "Yes" : "No") << std::endl;
+        std::cout << "Error: " << (HttpStatus::isError(code) ? "Yes" : "No") << std::endl;
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: HTTP RESPONSE FORMATTING
+    // ==========================================
+    else if (component == "http_response") {
+        // Create a mock response to test the toString() HTTP/1.1 formatting
+        HttpResponse res(201, "Created user successfully");
+        res.setHeader("Content-Type", "text/plain");
+        res.setHeader("Content-Length", HttpResponse::numberToString(25));
+        res.setConnectionClose(true);
+        
+        std::cout << res.toString();
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: HTTP ERROR PAGE
+    // ==========================================
+    else if (component == "http_error") {
+        if (argc < 3) return 1;
+        int code = std::atoi(argv[2]);
+        
+        HttpResponse res;
+        if (ErrorPage::tryBuildDefault(code, res)) {
+            std::cout << res.toString();
+        } else {
+            std::cout << "FAILED_ERROR_PAGE" << std::endl;
         }
         return 0;
     }
