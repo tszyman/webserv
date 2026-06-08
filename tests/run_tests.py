@@ -50,6 +50,8 @@ def compile_unit_tester():
         "../src/http/HttpResponse.cpp",    # ADDED Przemek tests
         "../src/http/HttpErrorPage.cpp",   # ADDED Przemek tests
         "../src/http/HttpRequest.cpp",     # ADDED Przemek tests
+		"../src/network/EventLoop.cpp",    # DODANO: Plik Bartka
+		"../src/core/Server.cpp",          # DODANO: Plik Bartka
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

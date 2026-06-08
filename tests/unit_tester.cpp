@@ -4,10 +4,13 @@
 #include <map>
 #include <vector>
 #include "network/SocketEngine.hpp"
+#include "network/EventLoop.hpp"
 #include "http/StatusCodes.hpp"
 #include "http/HttpResponse.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpRequest.hpp"
+#include "core/Server.hpp"
+
 
 /* 
 
@@ -132,6 +135,48 @@ else if (component == "socket") {
             std::cout << res.toString();
         } else {
             std::cout << "FAILED_ERROR_PAGE" << std::endl;
+        }
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: SERVER CORE
+    // ==========================================
+    else if (component == "server") {
+        if (argc < 3) return 1;
+        std::string action = argv[2];
+        
+        if (action == "config") {
+            Server server;
+            // Test the config loader (argc=0, argv=NULL)
+            if (server.loadConfig(0, NULL)) {
+                std::cout << "SUCCESS_CONFIG" << std::endl;
+            } else {
+                std::cout << "FAILED_CONFIG" << std::endl;
+            }
+        }
+        else if (action == "connections") {
+            // We create a scope block to test the Server's destructor behavior
+            {
+                Server server;
+                
+                // Create dummy network connections
+                Connection* c1 = new Connection(10);
+                Connection* c2 = new Connection(20);
+                
+                // Map them inside the server
+                server.addConnection(c1);
+                server.addConnection(c2);
+                
+                // Manually cleanup the first connection
+                server.cleanupConnection(10);
+                
+                std::cout << "SUCCESS_CONNECTIONS" << std::endl;
+                
+                // When 'server' goes out of scope here, its destructor should 
+                // automatically delete 'c2' (FD 20) and prevent memory leaks.
+            }
+            std::cout << "SERVER_DESTROYED" << std::endl;
         }
         return 0;
     }
