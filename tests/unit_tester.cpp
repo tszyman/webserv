@@ -3,6 +3,14 @@
 #include <string>
 #include <map>
 #include <vector>
+#include "network/SocketEngine.hpp"
+#include "network/EventLoop.hpp"
+#include "http/StatusCodes.hpp"
+#include "http/HttpResponse.hpp"
+#include "http/HttpErrorPage.hpp"
+#include "http/HttpRequest.hpp"
+#include "core/Server.hpp"
+
 
 /* 
 
@@ -41,17 +49,147 @@ void print_parser_result(const RequestParser &parser) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        std::cerr << "Usage: ./unit_tester [raw_http_payload]" << std::endl;
+        std::cerr << "Usage: ./unit_tester [component] [args...]" << std::endl;
         return 1;
     }
 
-    // Combine all arguments into a single raw HTTP payload string
-    std::string raw_payload = argv[1];
-    
-    RequestParser parser;
-    // Feed the raw data directly into your parser stream engine
-    parser.feed(raw_payload.c_str(), raw_payload.length());
+    std::string component = argv[1];
 
-    print_parser_result(parser);
-    return 0;
+    // ==========================================
+    // COMPONENT: REQUEST PARSER
+    // ==========================================
+    if (component == "parser") {
+        if (argc < 3) {
+            std::cerr << "Error: 'parser' requires a payload argument." << std::endl;
+            return 1;
+        }
+        std::string raw_payload = argv[2];
+        RequestParser parser;
+        parser.feed(raw_payload.c_str(), raw_payload.length());
+        print_parser_result(parser);
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: SOCKET ENGINE
+    // ==========================================
+else if (component == "socket") {
+        int port = (argc >= 3) ? std::atoi(argv[2]) : 8080;
+        SocketEngine engine(port); 
+        
+        // FIX: Wrap init() in a try-catch block to handle exceptions properly
+        try {
+            engine.init();
+            std::cout << "SUCCESS_SOCKET_INIT" << std::endl;
+        } 
+        catch (const std::exception& e) {
+            // Log the actual exception message to stderr for debugging
+            std::cerr << "SocketEngine exception caught: " << e.what() << std::endl;
+            // Print the failure token to stdout for the Python tester
+            std::cout << "FAILED_SOCKET_INIT" << std::endl;
+        }
+        catch (...) {
+            // Catch-all for non-standard exceptions
+            std::cerr << "SocketEngine unknown exception thrown." << std::endl;
+            std::cout << "FAILED_SOCKET_INIT" << std::endl;
+        }
+        return 0;
+    }
+
+	// ==========================================
+    // COMPONENT: HTTP STATUS CODES
+    // ==========================================
+    else if (component == "http_status") {
+        if (argc < 3) return 1;
+        int code = std::atoi(argv[2]);
+        
+        std::cout << "Phrase: " << HttpStatus::reasonPhrase(code) << std::endl;
+        std::cout << "Known: " << (HttpStatus::isKnown(code) ? "Yes" : "No") << std::endl;
+        std::cout << "Error: " << (HttpStatus::isError(code) ? "Yes" : "No") << std::endl;
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: HTTP RESPONSE FORMATTING
+    // ==========================================
+    else if (component == "http_response") {
+        // Create a mock response to test the toString() HTTP/1.1 formatting
+        HttpResponse res(201, "Created user successfully");
+        res.setHeader("Content-Type", "text/plain");
+        res.setHeader("Content-Length", HttpResponse::numberToString(25));
+        res.setConnectionClose(true);
+        
+        std::cout << res.toString();
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: HTTP ERROR PAGE
+    // ==========================================
+    else if (component == "http_error") {
+        if (argc < 3) return 1;
+        int code = std::atoi(argv[2]);
+        
+        HttpResponse res;
+        if (ErrorPage::tryBuildDefault(code, res)) {
+            std::cout << res.toString();
+        } else {
+            std::cout << "FAILED_ERROR_PAGE" << std::endl;
+        }
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: SERVER CORE
+    // ==========================================
+    else if (component == "server") {
+        if (argc < 3) return 1;
+        std::string action = argv[2];
+        
+        if (action == "config") {
+            Server server;
+            // Test the config loader (argc=0, argv=NULL)
+            if (server.loadConfig(0, NULL)) {
+                std::cout << "SUCCESS_CONFIG" << std::endl;
+            } else {
+                std::cout << "FAILED_CONFIG" << std::endl;
+            }
+        }
+        else if (action == "connections") {
+            // We create a scope block to test the Server's destructor behavior
+            {
+                Server server;
+                
+                // Create dummy network connections
+                Connection* c1 = new Connection(10);
+                Connection* c2 = new Connection(20);
+                
+                // Map them inside the server
+                server.addConnection(c1);
+                server.addConnection(c2);
+                
+                // Manually cleanup the first connection
+                server.cleanupConnection(10);
+                
+                std::cout << "SUCCESS_CONNECTIONS" << std::endl;
+                
+                // When 'server' goes out of scope here, its destructor should 
+                // automatically delete 'c2' (FD 20) and prevent memory leaks.
+            }
+            std::cout << "SERVER_DESTROYED" << std::endl;
+        }
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: CONNECTION (Placeholder)
+    // ==========================================
+    else if (component == "connection") {
+        // Implement connection testing logic here later
+        std::cout << "CONNECTION_TEST_PLACEHOLDER" << std::endl;
+        return 0;
+    }
+
+    std::cerr << "Unknown component: " << component << std::endl;
+    return 1;
 }

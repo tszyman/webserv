@@ -3,10 +3,10 @@ import subprocess
 
 class TestBodyHandling(unittest.TestCase):
 
-    def run_tester(self, raw_http_payload):
+    def run_tester(self, full_payload):
         """Helper to pass the entire raw HTTP payload into the unit_tester"""
         res = subprocess.run(
-            ["./unit_tester", raw_http_payload],
+            ["./unit_tester", "parser", full_payload],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True

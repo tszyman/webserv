@@ -6,7 +6,7 @@ class TestRequestLine(unittest.TestCase):
     def run_tester(self, full_payload):
         """Helper to execute unit_tester for internal class validation"""
         res = subprocess.run(
-            ["./unit_tester", full_payload],
+            ["./unit_tester", "parser", full_payload],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
