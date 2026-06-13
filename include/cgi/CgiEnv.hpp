@@ -7,9 +7,18 @@
 
 class CgiEnv {
 	public:
+		CgiEnv(const RequestParser& request, const std::string& scriptPath);
+		CgiEnv(const CgiEnv& other);
+		CgiEnv operator=(const CgiEnv& other);
+		~CgiEnv();
+
+		char** getEnv() const;
 	
 	private:
-	
+		std::map<std::string, std::string> _envMap;
+		char** _envp;
+
+		void _buildEnvpArray();
 };
 
 #endif
