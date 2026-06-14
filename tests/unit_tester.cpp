@@ -10,6 +10,9 @@
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpRequest.hpp"
 #include "core/Server.hpp"
+#include "cgi/CgiHandler.hpp"
+#include <sys/wait.h>
+#include <fcntl.h>
 
 
 /* 
@@ -187,6 +190,62 @@ else if (component == "socket") {
     else if (component == "connection") {
         // Implement connection testing logic here later
         std::cout << "CONNECTION_TEST_PLACEHOLDER" << std::endl;
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: CGI HANDLER
+    // ==========================================
+    else if (component == "cgi") {
+        if (argc < 4) {
+            std::cerr << "Usage: ./unit_tester cgi [script_path] [exec_path]" << std::endl;
+            return 1;
+        }
+        std::string scriptPath = argv[2];
+        std::string execPath = argv[3];
+
+        // Mock parser payload
+        RequestParser parser;
+        std::string raw_request = "POST /dummy.py HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nHello";
+        parser.feed(raw_request.c_str(), raw_request.length());
+
+        CgiHandler cgi;
+        if (!cgi.init(parser, scriptPath, execPath)) {
+            std::cout << "FAILED_CGI_INIT" << std::endl;
+            return 0;
+        }
+
+        // Simulate Poller Write
+        std::string body = "Hello";
+        write(cgi.getWriteFd(), body.c_str(), body.length());
+        
+		// CRITICAL: Zamykamy potok zapisu. To wysyła EOF do Pythona (sys.stdin.read() się kończy)
+        close(cgi.getWriteFd()); 
+
+        // FIX 1: Czekamy aż skrypt CGI skończy mielić i zamknie swój stdout (zrzuci bufory)
+        int status;
+        waitpid(cgi.getPid(), &status, 0);
+
+        // FIX 2: Wyłączamy O_NONBLOCK dla testowego readera, aby móc normalnie przeczytać bufor w pętli
+        int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
+        if (flags != -1) {
+            fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
+        }
+
+        // Simulate Poller Read
+        char buffer[1024];
+        std::string output = "";
+        int bytesRead;
+        while ((bytesRead = read(cgi.getReadFd(), buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[bytesRead] = '\0';
+            output += buffer;
+        }
+        close(cgi.getReadFd());
+
+        // Print machine-readable results for Python
+        std::cout << "SUCCESS_CGI" << std::endl;
+        std::cout << output; // Python will read this and assert its contents
+
         return 0;
     }
 
