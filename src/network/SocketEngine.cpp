@@ -70,19 +70,23 @@ Connection* SocketEngine::acceptConnection()
         return NULL;
     }
     
-    if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1)
+    if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1 || fcntl(client_fd, F_SETFD, FD_CLOEXEC) == -1)
     {
+        std::cerr << "[SocketEngine] Error: fcntl failed for FD " << client_fd << std::endl;
         close(client_fd);
         return NULL;
     }
     
-    if (fcntl(client_fd, F_SETFD, FD_CLOEXEC) == -1)
+    try
     {
+        return new Connection(client_fd);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[SocketEngine] Critical allocation error for FD " << client_fd << ": " << e.what() << std::endl;
         close(client_fd);
         return NULL;
     }
-
-    return new Connection(client_fd);
 }
 
 int SocketEngine::getFd() const
