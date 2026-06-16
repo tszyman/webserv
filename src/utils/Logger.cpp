@@ -10,7 +10,7 @@
 #define GRAY	"\033[90m"
 
 // Initialize static variable (default INFO level)
-Logger::Level Logger::_currentLevel = Logger::DEBUG;
+Logger::Level Logger::_currentLevel = Logger::INFO;
 
 void Logger::setLogLevel(Level level){
 	_currentLevel = level;
