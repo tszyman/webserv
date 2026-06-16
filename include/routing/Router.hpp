@@ -16,9 +16,9 @@ class Router {
 		void route(const RequestParser& request, HttpResponse& response) const;
 
 	private:
-		std::vector<LocationConfig> _locationConfig;
+		std::vector<LocationConfig> _locations;
 		const LocationConfig* matchLocation(const std::string& uri) const;
-		std::string translatePath(const std::string& uri, LocationConfig* location) const;
+		std::string translatePath(const std::string& uri, const LocationConfig* location) const;
 
 		// method handlers
 		void handleGet(const std::string& physicalPath, HttpResponse& response) const;
