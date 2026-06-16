@@ -11,6 +11,7 @@
 #include "http/HttpRequest.hpp"
 #include "core/Server.hpp"
 #include "cgi/CgiHandler.hpp"
+#include "utils/Logger.hpp"
 #include <sys/wait.h>
 #include <fcntl.h>
 
