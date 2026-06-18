@@ -58,6 +58,7 @@ def compile_unit_tester():
 		"../src/utils/Logger.cpp",         # Logger
 		"../src/routing/LocationConfig.cpp", # LocationConfig
 		"../src/core/Config.cpp",         # Config Parser
+		"../src/routing/Router.cpp",       # Routing
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

@@ -14,6 +14,7 @@
 #include "utils/Logger.hpp"
 #include "routing/LocationConfig.hpp"
 #include "core/Config.hpp"
+#include "routing/Router.hpp"
 #include <sys/wait.h>
 #include <fcntl.h>
 
@@ -280,6 +281,37 @@ else if (component == "socket") {
         } else {
             std::cout << "FAILED_CONFIG_PARSER" << std::endl;
         }
+    }
+    // ==========================================
+    // COMPONENT: ROUTER
+    // ==========================================
+    else if (component == "router") {
+        if (argc < 3) return 1;
+        std::string raw_payload = argv[2];
+
+        // 1. Setup Router and mock configurations
+        Router router;
+        
+        LocationConfig imagesLoc("/images", "/var/www/data");
+        imagesLoc.addAllowedMethod("GET");
+        imagesLoc.addAllowedMethod("DELETE");
+        router.addLocation(imagesLoc);
+
+        LocationConfig apiLoc("/upload", "/var/www/uploads");
+        apiLoc.addAllowedMethod("POST");
+        router.addLocation(apiLoc);
+
+        // 2. Parse the incoming fake request
+        RequestParser parser;
+        parser.feed(raw_payload.c_str(), raw_payload.length());
+
+        // 3. Route the request and capture the response
+        HttpResponse res;
+        router.route(parser, res);
+
+        // 4. Print output for Python to assert
+        std::cout << "SUCCESS_ROUTER" << std::endl;
+        std::cout << "STATUS: " << res.getStatusCode() << std::endl;
         return 0;
     }
 
