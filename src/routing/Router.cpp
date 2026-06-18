@@ -142,7 +142,7 @@ void Router::handlePost(const RequestParser& request, std::string& physicalPath,
 	(void)request;
 	
 	Logger::info("GET request for: " + physicalPath);
-	// TODO: Tomek's CGI logic or Przemek's upload logic goes here
+	// TODO: To be completed when EventLoop and Polling is ready
 
 	// For now, just return a dummy success so it compiles
 	response.setStatusCode(200);
