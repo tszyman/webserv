@@ -1,5 +1,6 @@
 #include "routing/Router.hpp"
 #include "http/HttpErrorPage.hpp"
+#include "utils/Logger.hpp"
 #include <iostream>
 #include <cstdio>
 #include <sys/stat.h>
@@ -45,12 +46,12 @@ std::string Router::translatePath(const std::string& uri, const LocationConfig* 
 	// Handle slashes to avoid "//" (when joining root and path)
 	std::string root = location->getRoot();
 	//if root ends with '/' and relativePath starts with '/', remove one to avoid "//"
-	if (!root.empty() && root[root.length() - 1] == '/' && !relativePath.empty() && !relativePath[0] == '/')
+	if (!root.empty() && root[root.length() - 1] == '/' && !relativePath.empty() && relativePath[0] == '/')
 	{
 		root.erase(root.length() - 1);
 	}
 	//If neither has a '/', add one so they don't glue together
-	else if (!root.empty() && root[root.length() - 1] != '/' && !relativePath.empty() && !relativePath[0] != '/')
+	else if (!root.empty() && root[root.length() - 1] != '/' && !relativePath.empty() && relativePath[0] != '/')
 	{
 		root += "/";
 	}
@@ -65,7 +66,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	// 1. HAndle 404 Not Found
 	if (location == NULL)
 	{
-		std::cerr << "[INFO] Router: No location found for " << request.getPath() << std::endl;
+		Logger::info("Router: No location found for " + request.getPath());
 		response.setStatusCode(404);
 		// somehow here need to build 404 error page. Not sure if used interface properly
 		response.setBody(ErrorPage::defaultBody(404));
@@ -75,7 +76,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	// 2. Handle 405 Method Not Allowed
 	if (!location->isMethodAllowed(request.getMethod()))
 	{
-		std::cerr << "[WARINING] Router: 405 Method Not Allowed (" << request.getMethod() << ") for " << request.getPath() << std::endl;
+		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + request.getPath());
 		response.setStatusCode(405);
 		// somehow here need to build 405 error page. Not sure if used interface properly
 		response.setBody(ErrorPage::defaultBody(405));
@@ -104,7 +105,7 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	// check if the file exists using stat
 	if (stat(physicalPath.c_str(), &buffer) != 0)
 	{
-		std::cout << "[INFO] DELETE Error: File not found - " << physicalPath << std::endl;
+		Logger::info("DELETE Error: File not found - " + physicalPath);
 		response.setStatusCode(404);
 		response.setBody(ErrorPage::defaultBody(404));
 		return;
@@ -113,14 +114,37 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	// try to remove the file using standard C++
 	if (std::remove(physicalPath.c_str()) == 0)
 	{
-		std::cout << "[INFO] DELETE Success: " << physicalPath << std::endl;
+		Logger::info("DELETE Success: " +  physicalPath);
 		response.setStatusCode(202);
 		response.setBody(ErrorPage::defaultBody(204));
 	}
 	else
 	{
-		std::cout << "[INFO] DELETE Error: Forbidden/No Access - " << physicalPath << std::endl;
+		Logger::info("[INFO] DELETE Error: Forbidden/No Access - " + physicalPath);
 		response.setStatusCode(403);
 		response.setBody(ErrorPage::defaultBody(403));
 	}
+}
+
+void Router::handleGet(const std::string& physicalPath, HttpResponse& response) const
+{
+	Logger::info("GET request for: " + physicalPath);
+	// TODO: Bartek will handle reading the static file and putting it into 'res' here
+
+	// For now, just return a dummy success so it compiles
+	response.setStatusCode(200);
+	response.setBody(ErrorPage::defaultBody(200));
+}
+
+void Router::handlePost(const RequestParser& request, std::string& physicalPath, HttpResponse& response) const
+{
+	// Just to trick the compiler
+	(void)request;
+	
+	Logger::info("GET request for: " + physicalPath);
+	// TODO: Tomek's CGI logic or Przemek's upload logic goes here
+
+	// For now, just return a dummy success so it compiles
+	response.setStatusCode(200);
+	response.setBody(ErrorPage::defaultBody(200));
 }
