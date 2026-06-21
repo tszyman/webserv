@@ -3,6 +3,7 @@
 
 # include "HttpResponse.hpp"
 # include <string>
+# include <map>
 
 class ErrorPage
 {
