@@ -16,7 +16,7 @@ void Config::tokenize(const std::string& fileContent)
 		char c = fileContent[i];
 
 		// 1. NGINX Comment handling
-		if (c = '#')
+		if (c == '#')
 		{
 			while ( i < fileContent.length() && fileContent[i] != '\n')
 			{
@@ -158,7 +158,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after root");
 			root = _tokens[_currentTokenIndex++];
-			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";");
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after root directive");
 		}
 		else if (directive == "allowed_methods")

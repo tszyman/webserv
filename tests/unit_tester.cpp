@@ -12,6 +12,8 @@
 #include "core/Server.hpp"
 #include "cgi/CgiHandler.hpp"
 #include "utils/Logger.hpp"
+#include "routing/LocationConfig.hpp"
+#include "core/Config.hpp"
 #include <sys/wait.h>
 #include <fcntl.h>
 
@@ -219,15 +221,9 @@ else if (component == "socket") {
         // Simulate Poller Write
         std::string body = "Hello";
         write(cgi.getWriteFd(), body.c_str(), body.length());
-        
-		// CRITICAL: Zamykamy potok zapisu. To wysyła EOF do Pythona (sys.stdin.read() się kończy)
         close(cgi.getWriteFd()); 
-
-        // FIX 1: Czekamy aż skrypt CGI skończy mielić i zamknie swój stdout (zrzuci bufory)
         int status;
         waitpid(cgi.getPid(), &status, 0);
-
-        // FIX 2: Wyłączamy O_NONBLOCK dla testowego readera, aby móc normalnie przeczytać bufor w pętli
         int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
         if (flags != -1) {
             fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
@@ -247,6 +243,36 @@ else if (component == "socket") {
         std::cout << "SUCCESS_CGI" << std::endl;
         std::cout << output; // Python will read this and assert its contents
 
+        return 0;
+    }
+
+    // ==========================================
+    // COMPONENT: CONFIG PARSER
+    // ==========================================
+    else if (component == "config_parser") {
+        if (argc < 3) {
+            std::cerr << "Usage: ./unit_tester config_parser [path_to_conf_file]" << std::endl;
+            return 1;
+        }
+        std::string config_file_path = argv[2];
+        
+        Config config;
+        // Test parsing the file
+        if (config.loadConfig(config_file_path)) {
+            std::cout << "SUCCESS_CONFIG_PARSER" << std::endl;
+            const std::vector<ServerConfig>& servers = config.getServers();
+            
+            for (size_t i = 0; i < servers.size(); ++i) {
+                std::cout << "Server Port: " << servers[i].port << std::endl;
+                std::cout << "Server Name: " << servers[i].serverName << std::endl;
+                for (size_t j = 0; j < servers[i].locations.size(); ++j) {
+                    std::cout << "Loc Path: " << servers[i].locations[j].getPath() << std::endl;
+                    std::cout << "Loc Root: " << servers[i].locations[j].getRoot() << std::endl;
+                }
+            }
+        } else {
+            std::cout << "FAILED_CONFIG_PARSER" << std::endl;
+        }
         return 0;
     }
 

@@ -56,6 +56,8 @@ def compile_unit_tester():
         "../src/cgi/CgiProcess.cpp",       # CGI Process
         "../src/cgi/CgiEnv.cpp",           # CGI Env
 		"../src/utils/Logger.cpp",         # Logger
+		"../src/routing/LocationConfig.cpp", # LocationConfig
+		"../src/core/Config.cpp",         # Config Parser
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
