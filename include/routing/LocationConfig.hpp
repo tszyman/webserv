@@ -13,7 +13,7 @@ class LocationConfig {
 		bool isMethodAllowed(const std::string& method) const;
 		const std::string& getPath() const;
 		const std::string& getRoot() const;
-		
+			
 	private:
 		std::string _path; // e.g. "/images/"
 		std::string _root; // e.g. "/var/www/data"
