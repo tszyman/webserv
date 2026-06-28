@@ -150,7 +150,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 		throw std::runtime_error("Unexpected EOF reading location path");
 	std::string path = _tokens[_currentTokenIndex++];
 
-	if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex] != "{")
+	if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != "{")
 		throw std::runtime_error("Expected '{' after location path " + path);
 
 	// Gathering variables first to satisfy LocationConfig's strict constructor
