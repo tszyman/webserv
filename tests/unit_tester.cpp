@@ -247,6 +247,107 @@ else if (component == "socket") {
         return 0;
     }
 
+    // ==========================================
+    // COMPONENT: ROUTER
+    // ==========================================
+    else if (component == "router") {
+        if (argc < 3) return 1;
+        std::string raw_payload = argv[2];
+
+        // 1. Setup Router and mock configurations
+        Router router;
+        
+        LocationConfig imagesLoc("/images", "/var/www/data");
+        imagesLoc.addAllowedMethod("GET");
+        imagesLoc.addAllowedMethod("DELETE");
+        router.addLocation(imagesLoc);
+
+        LocationConfig apiLoc("/upload", "/var/www/uploads");
+        apiLoc.addAllowedMethod("POST");
+        router.addLocation(apiLoc);
+
+        // 2. Parse the incoming fake request
+        RequestParser parser;
+        parser.feed(raw_payload.c_str(), raw_payload.length());
+
+        // 3. Route the request and capture the response
+        HttpResponse res;
+        router.route(parser, res);
+
+        // 4. Print output for Python to assert
+        std::cout << "SUCCESS_ROUTER" << std::endl;
+        std::cout << "STATUS: " << res.getStatusCode() << std::endl;
+        return 0;
+    }
+
+// ==========================================
+    // COMPONENT: CONFIG PARSER
+    // ==========================================
+    else if (component == "config_parser") {
+        if (argc < 3) {
+            std::cerr << "Usage: ./unit_tester config_parser [path_to_conf_file]" << std::endl;
+            return 1;
+        }
+        std::string config_file_path = argv[2];
+        
+        Config config;
+        // Test parsing the file
+        if (config.loadConfig(config_file_path)) {
+            std::cout << "SUCCESS_CONFIG_PARSER" << std::endl;
+            const std::vector<ServerConfig>& servers = config.getServers();
+            
+            for (size_t i = 0; i < servers.size(); ++i) {
+                std::cout << "Server Port: " << servers[i].port << std::endl;
+                std::cout << "Server Name: " << servers[i].serverName << std::endl;
+                std::cout << "Max Body Size: " << servers[i].clientMaxBodySize << std::endl;
+                
+                for (size_t j = 0; j < servers[i].locations.size(); ++j) {
+                    std::cout << "Loc Path: " << servers[i].locations[j].getPath() << std::endl;
+                    std::cout << "Loc Root: " << servers[i].locations[j].getRoot() << std::endl;
+                    std::cout << "Autoindex: " << (servers[i].locations[j].getAutoindex() ? "on" : "off") << std::endl;
+                    std::cout << "Upload: " << (servers[i].locations[j].isUploadEnabled() ? "on" : "off") << std::endl;
+                    std::cout << "Upload Store: " << servers[i].locations[j].getUploadStore() << std::endl;
+                    std::cout << "Method GET: " << (servers[i].locations[j].isMethodAllowed("GET") ? "yes" : "no") << std::endl;
+                    std::cout << "Method POST: " << (servers[i].locations[j].isMethodAllowed("POST") ? "yes" : "no") << std::endl;
+                }
+            }
+        } else {
+            std::cout << "FAILED_CONFIG_PARSER" << std::endl;
+        }
+    }
+    // ==========================================
+    // COMPONENT: ROUTER
+    // ==========================================
+    else if (component == "router") {
+        if (argc < 3) return 1;
+        std::string raw_payload = argv[2];
+
+        // 1. Setup Router and mock configurations
+        Router router;
+        
+        LocationConfig imagesLoc("/images", "/var/www/data");
+        imagesLoc.addAllowedMethod("GET");
+        imagesLoc.addAllowedMethod("DELETE");
+        router.addLocation(imagesLoc);
+
+        LocationConfig apiLoc("/upload", "/var/www/uploads");
+        apiLoc.addAllowedMethod("POST");
+        router.addLocation(apiLoc);
+
+        // 2. Parse the incoming fake request
+        RequestParser parser;
+        parser.feed(raw_payload.c_str(), raw_payload.length());
+
+        // 3. Route the request and capture the response
+        HttpResponse res;
+        router.route(parser, res);
+
+        // 4. Print output for Python to assert
+        std::cout << "SUCCESS_ROUTER" << std::endl;
+        std::cout << "STATUS: " << res.getStatusCode() << std::endl;
+        return 0;
+    }
+
 // ==========================================
     // COMPONENT: CONFIG PARSER
     // ==========================================
