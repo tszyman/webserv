@@ -1,15 +1,30 @@
 #include "routing/LocationConfig.hpp"
 #include <algorithm>
 
-LocationConfig::LocationConfig(const std::string& path, const std::string& root) : _path(path), _root(root) {}
+LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
+_path(path), _root(root), _autoindex(false), _uploadEnabled(false), _uploadStore("") {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
-	_allowedMethods.push_back(method);
+	if(std::find(_allowedMethods.begin(), _allowedMethods.end(), method) == _allowedMethods.end())
+		_allowedMethods.push_back(method);
+}
+
+void LocationConfig::setAutoindex(bool enabled)
+{
+	_autoindex = enabled;
+}
+
+void LocationConfig::setUpload(bool enabled, const std::string& storePath)
+{
+	_uploadEnabled = enabled;
+	_uploadStore = storePath;
 }
 
 bool LocationConfig::isMethodAllowed(const std::string& method) const
 {
+	if(_allowedMethods.empty())
+		return false;
 	return (std::find(_allowedMethods.begin(), _allowedMethods.end(), method) != _allowedMethods.end());
 }
 
@@ -21,4 +36,17 @@ const std::string& LocationConfig::getPath() const
 const std::string& LocationConfig::getRoot() const
 {
 	return _root;
+}
+
+bool LocationConfig::getAutoindex() const
+{
+	return _autoindex;
+}
+bool LocationConfig::isUploadEnabled() const
+{
+	return _uploadEnabled;
+}
+const std::string& LocationConfig::getUploadStore() const
+{
+	return _uploadStore;
 }

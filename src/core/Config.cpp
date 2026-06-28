@@ -121,6 +121,14 @@ void Config::parseServerBlock()
 		{
 			parseLocationBlock(newServer);
 		}
+		else if (directive == "client_max_body_size")
+		{
+			if(_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after clinent_max_body_size");
+			newServer.clientMaxBodySize = static_cast<size_t>(std::atoi(_tokens[_currentTokenIndex++].c_str()));
+			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ':' after client_max_body_size");
+		}
 		else
 		{
 			throw std::runtime_error("Unknown directive in server block: " + directive);
@@ -148,6 +156,9 @@ void Config::parseLocationBlock(ServerConfig& server)
 	// Gathering variables first to satisfy LocationConfig's strict constructor
 	std::string root = "";
 	std::vector<std::string> allowedMethods;
+	bool autoindex = false;
+	bool uploadEnabled = false;
+	std::string uploadStore = "";
 
 	while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != "}")
 	{
@@ -171,6 +182,32 @@ void Config::parseLocationBlock(ServerConfig& server)
 				throw std::runtime_error("Expected ';' after allowed_methods");
 			_currentTokenIndex++; // Skip ';'
 		}
+		else if (directive == "autoindex")
+		{
+			if(_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after autoindex");
+			std::string val = _tokens[_currentTokenIndex++];
+			autoindex = (val == "on");
+			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expacted ';' after autoindex");
+		}
+		else if (directive == "upload_enable")
+		{
+			if(_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after uplopad_enable");
+			std::string val = _tokens[_currentTokenIndex++];
+			uploadEnabled = (val == "on");
+			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expacted ';' after upload_enable");
+		}
+		else if (directive == "upload_store")
+		{
+			if(_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after uplopad_store");
+			uploadStore = _tokens[_currentTokenIndex++];
+			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expacted ';' after upload_store");
+		}
 		else
 		{
 			throw std::runtime_error("Unknown directive in location block: " + directive);
@@ -186,6 +223,11 @@ void Config::parseLocationBlock(ServerConfig& server)
 	for (size_t i = 0; i < allowedMethods.size(); ++i)
 	{
 		newLocation.addAllowedMethod(allowedMethods[i]);
+	}
+	newLocation.setAutoindex(autoindex);
+	if(uploadEnabled)
+	{
+		newLocation.setUpload(true,uploadStore);
 	}
 	server.locations.push_back(newLocation);
 }

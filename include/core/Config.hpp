@@ -11,8 +11,10 @@ struct ServerConfig {
 	int port;
 	std::string serverName;
 	std::vector<LocationConfig> locations;
+	size_t clientMaxBodySize;
 
-	ServerConfig() : port(8080), serverName("localhost") {}
+	// clientMaxBodySize: Default to 1MB (1048576 bytes) if not specified, or 0 for unlimited
+	ServerConfig() : port(8080), serverName("localhost"), clientMaxBodySize(1048576) {}
 };
 
 class Config {
