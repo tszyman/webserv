@@ -1,5 +1,6 @@
 #include "core/Server.hpp"
 #include "network/EventLoop.hpp"
+#include "utils/Logger.hpp"
 #include <iostream>
 
 Server::Server()
@@ -27,9 +28,23 @@ bool Server::loadConfig(int argc, char **argv)
 
 void Server::run()
 {
-    std::cout << "Server started" << std::endl;
-    EventLoop loop;
+    Logger::info("Starting up...");
+    SocketEngine engine(8080);
+
+    try
+    {
+        engine.init();
+    }
+    catch (const std::exception& e)
+    {
+        Logger::error(std::string("Failed to initialize SocketEngine: ") + e.what());
+        return;
+    }
+
+    EventLoop loop(&engine);
+
     loop.run();
+
 }
 
 void Server::addConnection(Connection* conn)
