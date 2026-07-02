@@ -97,7 +97,36 @@ void EventLoop::run()
 				buffer[bytes_read] = '\0';
 
 				Logger::debug(std::string("Received ") + StringUtils::to_string(bytes_read) + " bytes from FD " + StringUtils::to_string(current_fd));
-				Logger::debug(std::string("--- Data snippet ---\n") + buffer + "\n--------------------");
+				std::string mock_http_response = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello Webserv";
+				_connections[current_fd]->appendResponse(mock_http_response);
+
+				_poller.setEvents(current_fd, POLLIN | POLLOUT);
+			}
+		}
+	}
+
+	if (revents & POLLOUT)
+	{
+		Connection* conn = _connections[current_fd];
+		std::string& response = conn->getResponseBuffer();
+
+		if (!response.empty())
+		{
+			ssize_t bytes_sent = send(current_fd, response.c_str(), response.size(), 0);
+
+			if (bytes_sent > 0)
+			{
+				Logger::debug(std::string("Sent ") + StringUtils::to_string(bytes_sent) + " bytes to FD " + StringUtils::to_string(current_fd));
+				conn->eraseSentData(bytes_sent);
+			}
+			else if (bytes_sent < 0)
+			{
+				Logger::error(std::string("Send() error on FD: ") + StringUtils::to_string(current_fd));
+			}
+
+			if(conn->getResponseBuffer().empty())
+			{
+				_poller.setEvents(current_fd, POLLIN);
 			}
 		}
 	}

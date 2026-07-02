@@ -20,6 +20,7 @@ class Poller
             void removeFd(int fd);
 
             int poll (int timeout);
+            void setEvents(int fd, short events);
 
             std::vector<struct pollfd>& getFds();
 };

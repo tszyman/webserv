@@ -21,3 +21,18 @@ int Connection::getFd() const
 {
     return _fd;
 }
+
+void Connection::appendResponse(const std::string& data)
+{
+    _response_buffer += data;
+}
+
+std::string& Connection::getResponseBuffer()
+{
+    return _response_buffer;
+}
+
+void Connection::eraseSentData(size_t bytes)
+{
+    _response_buffer.erase(0, bytes);
+}
