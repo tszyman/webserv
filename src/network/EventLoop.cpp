@@ -32,42 +32,66 @@ void EventLoop::run()
 
 	std::vector<struct pollfd>& fds = _poller.getFds();
 
+	//iterate backwards because removeFd() modifies the vector during execution
 	for (int i = fds.size() - 1; i >= 0; --i)
 	{
-		if (fds[i].revents & POLLIN)
+		int current_fd = fds[i].fd;
+		short revents = fds[i].revents;
+
+		// 1. IO Multiplexing Safeguard: Detect errors and broken connections
+		if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		{
-			int current_fd = fds[i].fd;
+			Logger::warning(std::string("Socket error/hangup detected on FD: ") +StringUtils::to_string(current_fd));
 		
-		// First case. New Client
-		if (current_fd == _server_engine->getFd())
-		{
-			Connection* new_conn = _server_engine->acceptConnection();
-			if (new_conn)
+			// If new client socket, clean up memory
+			if (current_fd != _server_engine->getFd())
 			{
-				int client_fd = new_conn->getFd();
-				_connections[client_fd] = new_conn;
-				_poller.addFd(client_fd, POLLIN);
-
-				Logger::info(std::string("Accepted and monitoring new client FD: ") + StringUtils::to_string(client_fd));
+				delete _connections[current_fd];
+				_connections.erase(current_fd);
 			}
+			//remove the broken socket from our poller
+			_poller.removeFd(current_fd);
+			continue; // skip to next FD
 		}
+		// 2. Main read handling with POLLIN
+		if (revents & POLLIN)
+		{
+			// A: Event on the listening socket (New Client)
+			if (current_fd == _server_engine->getFd())
+			{
+				Connection* new_conn = _server_engine->acceptConnection();
+				if (new_conn)
+				{
+					int client_fd = new_conn->getFd();
+					_connections[client_fd] = new_conn;
+					_poller.addFd(client_fd, POLLIN);
 
-		//Second case. Data or Disconnect from Client socket.
-
+					Logger::info(std::string("Accepted and monitoring new client FD: ") + StringUtils::to_string(client_fd));
+				}
+			}
+		// B: Event on a client socket (Incoming data).
 		else
 		{
 			char buffer[1024];
 			ssize_t bytes_read = recv(current_fd, buffer, sizeof(buffer) - 1, 0);
 
-			if (bytes_read <= 0)
+			// Graceful disconnection
+			if (bytes_read == 0)
 			{
-				Logger::info(std::string("Client disconnected or error on FD: ") + StringUtils::to_string(current_fd));
-
+				Logger::info(std::string("Client gracefully disconnected on FD: ") + StringUtils::to_string(current_fd));
 				delete _connections[current_fd];
 				_connections.erase(current_fd);
 				_poller.removeFd(current_fd);
 			}
-
+			//Read error (return -1)
+			else if (bytes_read < 0)
+			{
+				Logger::warning(std::string("recv() error on FD: ") + StringUtils::to_string(current_fd));
+				delete _connections[current_fd];
+				_connections.erase(current_fd);
+				_poller.removeFd(current_fd);
+			}
+			// Successful data read
 			else
 			{
 				buffer[bytes_read] = '\0';
