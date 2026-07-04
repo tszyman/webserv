@@ -26,23 +26,22 @@ class TestServerCore(unittest.TestCase):
         """Verify Server properly maps descriptors, cleans up instances, and prevents memory leaks"""
         out, err = self.run_tester("server", "connections")
         
-        # 1. Sprawdzamy czy tester C++ nie wywrócił się z błędem w połowie testu
+        # 1. Verify the C++ tester didn't crash
         self.assertIn("SUCCESS_CONNECTIONS", out)
         self.assertIn("SERVER_DESTROYED", out)
         
-        # 2. Weryfikujemy logi na standardowym wyjściu (std::cout) zarządzane przez Server.cpp
-        # Serwer ma zarejestrować 2 połączenia i ubić 1.
+        # 2. Verify Server.cpp logs
         self.assertIn("[Server] Mapping created for FD: 10", out)
         self.assertIn("[Server] Mapping created for FD: 20", out)
         self.assertIn("[Server] Cleaning up and removing connection for FD: 10", out)
         
-        # 3. Weryfikujemy logi na standardowym wyjściu błędu (std::cerr) zarządzane przez Connection.cpp
-        self.assertIn("[Connection] New connection created on FD: 10", err)
-        self.assertIn("[Connection] New connection created on FD: 20", err)
+        # 3. Verify Connection.cpp logs (Now captured in 'out' due to Logger::info)
+        self.assertIn("New connection created on FD: 10", out)
+        self.assertIn("New connection created on FD: 20", out)
         
-        # Upewniamy się, że ręcznie zwolnione połącznie wywołało destruktor Connection
-        self.assertIn("[Connection] Closing connection on FD: 10", err)
+        # Ensure manually cleaned up connection triggered the destructor
+        self.assertIn("Closing connection on FD: 10", out)
         
-        # NAJWAŻNIEJSZE: Upewniamy się, że destruktor klasy Server (~Server) posprzątał sierotę (c2 - FD: 20)
-        self.assertIn("[Connection] Closing connection on FD: 20", err, 
-            "Błąd: Serwer nie wyczyścił zaległych połączeń w swoim destruktorze (Memory Leak!)")
+        # MOST IMPORTANT: Ensure Server destructor cleaned up the orphan connection
+        self.assertIn("Closing connection on FD: 20", out, 
+            "Error: Server did not clean up remaining connections in its destructor (Memory Leak!)")

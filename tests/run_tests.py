@@ -58,7 +58,9 @@ def compile_unit_tester():
 		"../src/utils/Logger.cpp",         # Logger
 		"../src/routing/Router.cpp",       # Router
 		"../src/routing/LocationConfig.cpp",# LocationConfig
-		"../src/core/Config.cpp",         # Config
+		"../src/core/Config.cpp",          # Config
+		"../src/network/Poller.cpp",       # Poller
+		"../src/http/Autoindex.cpp",       # Autoindex
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
