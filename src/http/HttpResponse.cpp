@@ -1,5 +1,7 @@
 #include "../../include/http/HttpResponse.hpp"
 #include "../../include/http/StatusCodes.hpp"
+#include "filesystem/FileSystem.hpp"
+#include "http/HttpErrorPage.hpp"
 #include <sstream>
 
 HttpResponse::HttpResponse()
@@ -66,4 +68,20 @@ std::string HttpResponse::numberToString(unsigned long value)
     std::ostringstream output;
     output << value;
     return output.str();
+}
+
+void HttpResponse::serveStaticFile(const std::string& filePath)
+{
+    try
+    {
+        std::string content = FileSystem::readFile(filePath);
+        setStatusCode(200);
+        setBody(content);
+        setHeader("Content-Type", FileSystem::getMimeType(filePath));
+        setHeader("Content-Length", numberToString(content.length()));
+    }
+    catch(const std::exception& e)
+    {
+        ErrorPage::tryBuildDefault(404, *this);
+    }
 }
