@@ -21,6 +21,7 @@ class HttpResponse
         void setBody(const std::string &body);
         void setHeader(const std::string &name, const std::string &value);
         void setConnectionClose(bool closeConnection);
+        void serveStaticFile(const std::string& filePath);
 
         std::string toString() const;
         
