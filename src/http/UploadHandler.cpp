@@ -3,6 +3,26 @@
 #include <cctype>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
+
+namespace
+{
+    class FdGuard
+    {
+        public:
+            explicit FdGuard(int fd) : _fd(fd) {}
+            ~FdGuard()
+            {
+                if (_fd >= 0)
+                    close(_fd);
+            }
+        
+            private:
+                FdGuard(const FdGuard &other);
+                FdGuard &operator=(const FdGuard &other);
+                int _fd;
+    };
+}
 
 UploadHandler::TargetStatus UploadHandler::validateTarget(const std::string &uploadDirectory, const std::string &filename, std::string &targetPath)
 {
@@ -28,6 +48,26 @@ bool UploadHandler::prepareTarget(const std::string &uploadDirectory, const std:
     if (status == TARGET_OK)
         return true;
     return ErrorPage::tryBuildDefault(httpSttusFor(status), errorResponse);
+}
+
+bool UploadHandler::handleUpload(const std::string &uploadDirectory, const std::string &filename, const std::string &body, unsigned long maxBodySize, HttpResponse &response)
+{
+    std::string targetPath;
+
+    if (!prepareTarget(uploadDirectory, filename, targetPath, response))
+        return false;
+    if (body.size() > maxBodySize)
+    {
+        ErrorPage::tryBuildDefault(413, response);
+        return false;
+    }
+    if (!writeBodyToFile(targetPath, body))
+    {
+        ErrorPage::tryBuildDefault(500, response);
+        return false;
+    }
+    response = buildCreatedResponse();
+    return true;
 }
 
 int UploadHandler::httpSttusFor(TargetStatus status)
@@ -91,6 +131,35 @@ UploadHandler::TargetStatus UploadHandler::validateUploadDirectory(const std::st
 bool UploadHandler::hasWritePermission(const std::string &path)
 {
     return access(path.c_str(), W_OK | X_OK) == 0;
+}
+
+bool UploadHandler::writeBodyToFile(const std::string &targetPath, const std::string &body)
+{
+    int fd;
+    std::string::size_type totalWritten;
+
+    fd = open(targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        return false;
+    FdGuard guard(fd);
+    totalWritten = 0;
+    while (totalWritten < body.size())
+    {
+        const ssize_t written = write(fd, body.data() + totalWritten, body.size() - totalWritten);
+        if (written <= 0)
+            return false;
+        totalWritten += static_cast<std::string::size_type>(written);
+    }
+    return true;
+}
+
+HttpResponse UploadHandler::buildCreatedResponse()
+{
+    const std::string body = "Created\n";
+    HttpResponse response(201, body);
+    response.setHeader("Content-Type", "text/plain");
+    response.setHeader("Content-Length", HttpResponse::numberToString(body.size()));
+    return response;
 }
 
 std::string UploadHandler::joinPath(const std::string &directory, const std::string &filename)

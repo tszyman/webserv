@@ -19,7 +19,8 @@ class UploadHandler
         };
 
         static TargetStatus validateTarget(const std::string &uploadDirectory, const std::string &filename, std::string &targetPath);
-        static bool prepareTarget (const std::string &uploadDirectory, const std::string &filename, std::string &targetPath, HttpResponse &errorResponse);
+        static bool prepareTarget(const std::string &uploadDirectory, const std::string &filename, std::string &targetPath, HttpResponse &errorResponse);
+        static bool handleUpload(const std::string &uploadDirectory, const std::string &filename, const std::string &body, unsigned long maxBodySize, HttpResponse &response);
         static int httpSttusFor(TargetStatus status);
         static const char *messageFor(TargetStatus status);
 
@@ -32,6 +33,8 @@ class UploadHandler
         static bool isSafeFilename(const std::string &filename);
         static TargetStatus validateUploadDirectory(const std::string &path);
         static bool hasWritePermission(const std::string &path);
+        static bool writeBodyToFile(const std::string &targetPath, const std::string &body);
+        static HttpResponse buildCreatedResponse();
         static std::string joinPath(const std::string &directory, const std::string &filename);
     };
 
