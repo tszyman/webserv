@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         std::string raw_payload = argv[2];
-        RequestParser parser;
+        RequestParser parser(200);
         parser.feed(raw_payload.c_str(), raw_payload.length());
         print_parser_result(parser);
         return 0;
@@ -214,7 +214,7 @@ else if (component == "socket") {
         std::string execPath = argv[3];
 
         // Mock parser payload
-        RequestParser parser;
+        RequestParser parser(200);
         std::string raw_request = "POST /dummy.py HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nHello";
         parser.feed(raw_request.c_str(), raw_request.length());
 
@@ -272,7 +272,7 @@ else if (component == "socket") {
         router.addLocation(apiLoc);
 
         // 2. Parse the incoming fake request
-        RequestParser parser;
+        RequestParser parser(200);
         parser.feed(raw_payload.c_str(), raw_payload.length());
 
         // 3. Route the request and capture the response
