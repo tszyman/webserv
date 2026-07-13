@@ -61,6 +61,14 @@ std::string Router::translatePath(const std::string& uri, const LocationConfig* 
 
 void Router::route(const RequestParser& request, HttpResponse& response) const
 {
+	if (request.getState() == RequestParser::STATE_PAYLOAD_TOO_LARGE)
+	{
+		Logger::warning("Router: Payload too large.");
+		response.setStatusCode(413);
+		response.setBody(ErrorPage::defaultBody(413));
+		return;
+	}
+
 	const LocationConfig* location = matchLocation(request.getPath());
 
 	// 1. HAndle 404 Not Found

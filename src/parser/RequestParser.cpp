@@ -1,12 +1,16 @@
 #include "parser/RequestParser.hpp"
+#include <algorithm>
 #include <string>
 
-RequestParser::RequestParser() 
-	: _state(STATE_REQUEST_LINE), _bodyType(BODY_NONE), 
-	_contentLength(0), _bytesRead(0),
-	_chunkState(CHUNK_SIZE), _currentChunkSize(0)
+RequestParser::RequestParser(size_t maxBodySize) 
+	: _state(STATE_REQUEST_LINE), _bodyType(BODY_NONE),
+	_method(), _path(), _version(), _headers(), _body(),
+	_headerBuffer(), _contentLength(0), _bytesRead(0),
+	_chunkState(CHUNK_SIZE), _currentChunkSize(0), _chunkHexBuffer(),
+	_maxBodySize(maxBodySize)
 {
 }
+
 std::string RequestParser::trim(const std::string &str)
 {
 	std::string::size_type start = 0;
@@ -63,7 +67,9 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 	std::string value = trim(line.substr(pos + 1));
 
 	if(key.empty())
+	{
 		return false;
+ 	}
 
 	size_t i = 0;
 	while(i < key.size())
@@ -71,6 +77,20 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 		if(key[i] == ' ' || key[i] == '\t')
 			return false;
 		i++;
+	}
+
+	if (key == "Content-Length")
+	{
+		char *endptr;
+		long parsedLength = std::strtol(value.c_str(), &endptr, 10);
+		if (endptr == value.c_str() || *endptr != '\0' || parsedLength < 0)
+			return false;
+
+		_contentLength = static_cast<size_t>(parsedLength);
+		if (_maxBodySize != 0 && _contentLength > _maxBodySize)
+		{
+			_state = STATE_PAYLOAD_TOO_LARGE;
+		}
 	}
 
 	_headers[key] = value;
@@ -120,7 +140,20 @@ void RequestParser::determineBodyType()
 	if(it != _headers.end())
 	{
 		_bodyType = BODY_CONTENT_LENGTH;
-		_contentLength = static_cast<size_t>(std::strtol(it->second.c_str(),NULL,10));
+		char *endptr;
+		long parsedLength = std::strtol(it->second.c_str(), &endptr, 10);
+		if (endptr == it->second.c_str() || *endptr != '\0' || parsedLength < 0)
+		{
+			_state = STATE_ERROR;
+			return;
+		}
+
+		_contentLength = static_cast<size_t>(parsedLength);
+		if (_maxBodySize != 0 && _contentLength > _maxBodySize)
+		{
+			_state = STATE_PAYLOAD_TOO_LARGE;
+			return;
+		}
 		_body.reserve(_contentLength);
 		if(_contentLength == 0)
 		{
@@ -140,7 +173,7 @@ void RequestParser::feed(const char* data, size_t length)
 		return;
 
 	size_t i = 0;
-	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE)
+	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
 	{
 		_headerBuffer += data[i];
 		if(_headerBuffer.size() >= 2 && _headerBuffer.substr(_headerBuffer.size() - 2) == "\r\n")
@@ -178,6 +211,11 @@ void RequestParser::processBody(const char* data, size_t length)
 	if(_bodyType == BODY_CONTENT_LENGTH)
 	{
 		size_t bytesToRead = std::min(length, _contentLength - _bytesRead);
+		if (_maxBodySize != 0 && _body.size() + bytesToRead > _maxBodySize)
+		{
+			_state = STATE_PAYLOAD_TOO_LARGE;
+			return;
+		}
 		_body.insert(_body.end(), data, data + bytesToRead);
 		_bytesRead += bytesToRead;
 		if(_bytesRead >= _contentLength)
@@ -188,7 +226,7 @@ void RequestParser::processBody(const char* data, size_t length)
 	else if(_bodyType == BODY_CHUNKED)
 	{
 		size_t i = 0;
-		while(i < length && _state != STATE_ERROR && _state != STATE_COMPLETE)
+		while(i < length && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
 		{
 			if(_chunkState == CHUNK_SIZE)
 			{
@@ -210,6 +248,11 @@ void RequestParser::processBody(const char* data, size_t length)
 					else
 					{
 						_currentChunkSize = static_cast<size_t>(std::strtol(size_line.c_str(), NULL, 16));
+						if (_maxBodySize != 0 && _body.size() + _currentChunkSize > _maxBodySize)
+						{
+							_state = STATE_PAYLOAD_TOO_LARGE;
+							return;
+						}
 						_chunkHexBuffer.clear();
 						_bytesRead = 0;
 						if(_currentChunkSize == 0)
@@ -221,6 +264,11 @@ void RequestParser::processBody(const char* data, size_t length)
 			}
 			else if(_chunkState == CHUNK_DATA)
 			{
+				if (_maxBodySize != 0 && _body.size() + 1 > _maxBodySize)
+				{
+					_state = STATE_PAYLOAD_TOO_LARGE;
+					return;
+				}
 				_body.push_back(data[i++]);
 				_bytesRead++;
 				
