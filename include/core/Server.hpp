@@ -3,11 +3,13 @@
 
 #include <map>
 #include "network/Connection.hpp"
+#include "core/Config.hpp"
 
 class Server
 {
     private:
         std::map<int, Connection*> _client_connections;
+        Config _config;
 
         Server(const Server& other);
         Server& operator=(const Server& other);
