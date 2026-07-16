@@ -6,6 +6,7 @@
 Connection::Connection(int fd) : _fd(fd)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
+    _last_activity = time(NULL);
 }
 
 Connection::~Connection()
@@ -35,4 +36,21 @@ std::string& Connection::getResponseBuffer()
 void Connection::eraseSentData(size_t bytes)
 {
     _response_buffer.erase(0, bytes);
+}
+
+void Connection::reset()
+{
+    _parser = RequestParser();
+    _response_buffer.clear();
+    updateLastActivity();
+}
+
+void Connection::updateLastActivity()
+{
+    _last_activity = time(NULL);
+}
+
+bool Connection::isTimedOut(int timeout_seconds) const
+{
+    return difftime(time(NULL), _last_activity) > timeout_seconds;
 }

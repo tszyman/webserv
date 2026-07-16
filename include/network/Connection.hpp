@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 #include <string>
+#include <ctime>
 #include "parser/RequestParser.hpp"
 
 class Connection // class representing client
@@ -11,6 +12,7 @@ class Connection // class representing client
         int _fd;
         std::string _response_buffer;
         RequestParser _parser;
+        time_t _last_activity;
 
         // Block copy (cannot exist the same FD)
         Connection(const Connection& other);
@@ -26,6 +28,9 @@ class Connection // class representing client
         void appendResponse(const std::string& data);
         std::string& getResponseBuffer();
         void eraseSentData(size_t bytes);
+        void reset();
+        void updateLastActivity();
+        bool isTimedOut(int timeout_second) const;
 };
 
 #endif
