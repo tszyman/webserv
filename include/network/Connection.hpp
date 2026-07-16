@@ -13,13 +13,14 @@ class Connection // class representing client
         std::string _response_buffer;
         RequestParser _parser;
         time_t _last_activity;
+        size_t _max_body_size;
 
         // Block copy (cannot exist the same FD)
         Connection(const Connection& other);
         Connection& operator=(const Connection& other);
 
     public:
-        Connection(int fd);
+        Connection(int fd, size_t maxBodySize = 1048576);
         ~Connection();
 
         int getFd() const;

@@ -21,6 +21,17 @@ EventLoop::~EventLoop()
 	_connections.clear(); 
 }
 
+size_t EventLoop::getMaxBodySizeForPort(int port) const
+{
+	for (size_t i = 0; i < _servers.size(); ++i)
+	{
+		if (_servers[i].port == port)
+			return _servers[i].clientMaxBodySize;
+	}
+
+	return 1048576;
+}
+
 const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) const
 {
 	std::string host = hostHeader;
@@ -115,7 +126,8 @@ void EventLoop::run()
 		{
 			if (is_server_socket)
 			{
-				Connection* new_conn = active_engine->acceptConnection();
+				size_t max_body_size = getMaxBodySizeForPort(active_engine->getPort());
+				Connection* new_conn = active_engine->acceptConnection(max_body_size);
 				if (new_conn != NULL)
 				{
 					int client_fd = new_conn->getFd();
