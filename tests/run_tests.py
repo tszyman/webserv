@@ -61,6 +61,9 @@ def compile_unit_tester():
 		"../src/core/Config.cpp",          # Config
 		"../src/network/Poller.cpp",       # Poller
 		"../src/http/Autoindex.cpp",       # Autoindex
+		"../src/filesystem/DirectoryListing.cpp", #Filesystem
+		"../src/filesystem/FileSystem.cpp", #Filesystem
+		"../src/filesystem/UploadHandler.cpp", #Filesystem
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
