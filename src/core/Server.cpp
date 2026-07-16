@@ -80,7 +80,7 @@ void Server::run()
         return;
     }
 
-    EventLoop loop(engines);
+    EventLoop loop(engines, servers);
     loop.run();
 
     for (size_t i = 0; i < engines.size(); ++i)

@@ -4,7 +4,8 @@
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpResponse.hpp"
 
-EventLoop::EventLoop(const std::vector<SocketEngine*>& engines) : _is_running(true), _server_engines(engines)
+EventLoop::EventLoop(const std::vector<SocketEngine*>& engines, const std::vector<ServerConfig>& servers)
+	: _is_running(true), _server_engines(engines), _servers(servers)
 {
 	if(_server_engines.empty())
 		throw std::runtime_error("EventLoop initialized with empty SocketEngine list");
@@ -20,13 +21,52 @@ EventLoop::~EventLoop()
 	_connections.clear(); 
 }
 
+const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) const
+{
+	std::string host = hostHeader;
+
+	size_t colon_pos = host.find(':');
+	if (colon_pos != std::string::npos)
+		host = host.substr(0, colon_pos);
+
+	for (size_t i = 0; i < _servers.size(); ++i)
+	{
+		if (_servers[i].serverName == host)
+			return &_servers[i];
+	}
+
+	if (!_servers.empty())
+		return &_servers[0];
+	
+	return NULL;
+}
+
 void EventLoop::run()
 {
 	Logger::info("Starting the minimal event loop...");
+	const int TIMEOUT_LIMIT = 15;
 
 	while (_is_running)
 	{
-		int ready_count = _poller.poll(-1);
+		std::map<int, Connection*>::iterator it = _connections.begin();
+		while (it != _connections.end())
+		{
+			if (it->second->isTimedOut(TIMEOUT_LIMIT))
+			{
+				int timeout_fd = it->first;
+				Logger::warning("Connection timed out. Closing FD " + StringUtils::to_string(timeout_fd));
+				close(timeout_fd);
+				_poller.removeFd(timeout_fd);
+				delete it->second;
+				_connections.erase(it++);
+			}
+			else
+			{
+				++it;
+			}
+		}
+
+		int ready_count = _poller.poll(2000);
 
 		if (ready_count < 0)
 		{
@@ -111,28 +151,36 @@ void EventLoop::run()
 			else
 			{
 				Connection* conn = _connections[current_fd];
+				conn->updateLastActivity();
 				conn->getParser().feed(buffer, bytes_read);
 				RequestParser::ParserState state = conn->getParser().getState();
 
 				if (state == RequestParser::STATE_COMPLETE)
 				{
-					Logger::info("Request fully parsed! Method: " + conn->getParser().getMethod() + " Path: " + conn->getParser().getPath());
+					Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
 
 					HttpResponse response;
-					std::string method = conn->getParser().getMethod();
-					std::string path = conn->getParser().getPath();
+					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
+					std::string host = "";
+					std::map<std::string, std::string>::const_iterator it = headers.find("Host");
+					if (it != headers.end())
+						host = it->second;
+					
+					const ServerConfig* current_config = matchServerConfig(host);
 
-					if (method == "GET")
+					if (current_config != NULL)
 					{
-						if (path == "/") path = "index.html";
+						Router router;
+						for (size_t i = 0; i < current_config->locations.size(); ++i)
+						{
+							router.addLocation(current_config->locations[i]);
+						}
 
-						std::string local_path = "www" + path;
-
-						response.serveStaticFile(local_path);
+						router.route(conn->getParser(), response);
 					}
 					else
 					{
-						ErrorPage::tryBuildDefault(405, response);
+						ErrorPage::tryBuildDefault(500, response);
 					}
 
 					conn->appendResponse(response.toString());
@@ -175,7 +223,29 @@ void EventLoop::run()
 
 				if(conn->getResponseBuffer().empty())
 				{
-					_poller.setEvents(current_fd, POLLIN);
+					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
+					bool keep_alive = true;
+
+					std::map<std::string, std::string>::const_iterator it = headers.find("Connection");
+					if (it != headers.end() && it->second == "close")
+					{
+						keep_alive = false;
+					}
+
+					if (keep_alive)
+					{
+						Logger::debug("Keep-Alive: Reseting state for FD " + StringUtils::to_string(current_fd));
+						conn->reset();
+						_poller.setEvents(current_fd, POLLIN);
+					}
+					else
+					{
+						Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
+						close(current_fd);
+						delete conn;
+						_connections.erase(current_fd);
+						_poller.removeFd(current_fd);
+					}
 				}
 			}
 		}
