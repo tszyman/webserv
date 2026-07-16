@@ -60,7 +60,7 @@ void SocketEngine::init()
     Logger::info(std::string("Server started and listening on port ") + StringUtils::to_string(_port) + "(FD: " + StringUtils::to_string(_server_fd) + ")");
 }
 
-Connection* SocketEngine::acceptConnection()
+Connection* SocketEngine::acceptConnection(size_t maxBodySize)
 {
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
@@ -81,7 +81,7 @@ Connection* SocketEngine::acceptConnection()
     
     try
     {
-        return new Connection(client_fd);
+        return new Connection(client_fd, maxBodySize);
     }
     catch (const std::exception& e)
     {
@@ -94,4 +94,9 @@ Connection* SocketEngine::acceptConnection()
 int SocketEngine::getFd() const
 {
     return _server_fd;
+}
+
+int SocketEngine::getPort() const
+{
+    return _port;
 }
