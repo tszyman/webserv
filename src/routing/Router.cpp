@@ -1,4 +1,5 @@
 #include "routing/Router.hpp"
+#include "http/Autoindex.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "utils/Logger.hpp"
 #include "utils/StringUtils.hpp"
@@ -90,7 +91,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	std::string physicalPath = translatePath(request.getPath(), location);
 
 	if (request.getMethod() == "GET"){
-		handleGet(physicalPath, response);
+		handleGet(request.getPath(), physicalPath, location, response);
 	} else if (request.getMethod() == "POST") {
 		handlePost(request, physicalPath, response);
 	} else if (request.getMethod() == "DELETE"){
@@ -129,11 +130,16 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	}
 }
 
-void Router::handleGet(const std::string& physicalPath, HttpResponse& response) const
+void Router::handleGet(const std::string& requestUri, const std::string& physicalPath, const LocationConfig* location, HttpResponse& response) const
 {
 	Logger::info("GET request for: " + physicalPath);
 	std::string targetPath = physicalPath;
+	std::string indexPath;
 	struct stat pathStat;
+	struct stat indexStat;
+	bool requestIsDirectory = false;
+	bool hasIndexFile = false;
+
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
 		Logger::warning("GET eRROR: File not found - " + targetPath);
@@ -142,17 +148,41 @@ void Router::handleGet(const std::string& physicalPath, HttpResponse& response) 
 		return;
 	}
 
-	if (S_ISDIR(pathStat.st_mode))
+	requestIsDirectory = S_ISDIR(pathStat.st_mode);
+	if (requestIsDirectory)
 	{
-		if (targetPath[targetPath.length() - 1] != '/')
-			targetPath += "/";
-		targetPath += "index.html";
+		indexPath = targetPath;
+		if (indexPath[indexPath.length() - 1] != '/')
+			indexPath += "/";
+		indexPath += "index.html";
+		hasIndexFile = (stat(indexPath.c_str(), &indexStat) == 0 && !S_ISDIR(indexStat.st_mode));
+		if (hasIndexFile)
+		{
+			targetPath = indexPath;
+			pathStat = indexStat;
+		}
+		else if (location != NULL && location->getAutoindex())
+		{
+			if (Autoindex::tryBuildResponse(physicalPath, requestUri, response))
+			{
+				Logger::info("GET Success: Autoindex generated for " + physicalPath);
+				return;
+			}
+			Logger::warning("GET Error: Failed to generate autoindex for " + physicalPath);
+			response = ErrorPage::buildDefault(500);
+			return;
+		}
+		else
+		{
+			Logger::warning("GET Error: Directory listing is disabled - " + physicalPath);
+			response = ErrorPage::buildDefault(403);
+			return;
+		}
 	}
 
 	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
 	{
 		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
-		// TODO: "Directorty listing (autoindex)" - Przemek
 		response.setStatusCode(403);
 		response.setBody(ErrorPage::defaultBody(403));
 		return;
