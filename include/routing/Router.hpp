@@ -21,7 +21,7 @@ class Router {
 		std::string translatePath(const std::string& uri, const LocationConfig* location) const;
 
 		// method handlers
-		void handleGet(const std::string& physicalPath, HttpResponse& response) const;
+		void handleGet(const std::string& requestUri, const std::string& physicalPath, const LocationConfig* location, HttpResponse& response) const;
 		void handlePost(const RequestParser& request, std::string& physicalPath, HttpResponse& response) const;
 		void handleDelete(const std::string& physicalPath, HttpResponse& response) const;
 		std::string getMimeType(const std::string& path) const;

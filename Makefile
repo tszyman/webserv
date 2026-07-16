@@ -33,6 +33,7 @@ SRC_FILES = \
     http/HttpResponse.cpp \
     http/StatusCodes.cpp \
 	http/HttpErrorPage.cpp \
+	http/Autoindex.cpp \
     \
     parser/RequestParser.cpp \
     parser/ChunkedDecoder.cpp \
