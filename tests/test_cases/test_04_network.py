@@ -19,7 +19,7 @@ class TestNetworkUnits(unittest.TestCase):
         # Test initialization on a standard test port
         output = self.run_socket_tester(8080)
         
-        self.assertEqual(output, "SUCCESS_SOCKET_INIT", 
+        self.assertIn("SUCCESS_SOCKET_INIT", output, 
             f"SocketEngine failed to initialize. Output was: {output}")
 
     def test_socket_engine_privilege_failure(self):

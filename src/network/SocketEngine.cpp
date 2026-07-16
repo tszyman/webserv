@@ -1,4 +1,6 @@
 #include "network/SocketEngine.hpp"
+#include "utils/Logger.hpp"
+#include "utils/StringUtils.hpp"
 
 SocketEngine::SocketEngine(int port) : _server_fd(-1), _port(port)
 {
@@ -55,7 +57,7 @@ void SocketEngine::init()
         throw std::runtime_error("Error: listen() failed");
     }
 
-    std::cerr << "[SocketEngine] Server started and listening on port " << _port << "(FD: " << _server_fd << ")" << std::endl; 
+    Logger::info(std::string("Server started and listening on port ") + StringUtils::to_string(_port) + "(FD: " + StringUtils::to_string(_server_fd) + ")");
 }
 
 Connection* SocketEngine::acceptConnection()
@@ -72,7 +74,7 @@ Connection* SocketEngine::acceptConnection()
     
     if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1 || fcntl(client_fd, F_SETFD, FD_CLOEXEC) == -1)
     {
-        std::cerr << "[SocketEngine] Error: fcntl failed for FD " << client_fd << std::endl;
+        Logger::error(std::string("fcntl failed for FD ") + StringUtils::to_string(client_fd));
         close(client_fd);
         return NULL;
     }
@@ -83,7 +85,7 @@ Connection* SocketEngine::acceptConnection()
     }
     catch (const std::exception& e)
     {
-        std::cerr << "[SocketEngine] Critical allocation error for FD " << client_fd << ": " << e.what() << std::endl;
+        Logger::error(std::string("Critical allocation error for FD ") + StringUtils::to_string(client_fd) + ": " + e.what());
         close(client_fd);
         return NULL;
     }

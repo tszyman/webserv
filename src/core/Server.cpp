@@ -1,6 +1,11 @@
 #include "core/Server.hpp"
 #include "network/EventLoop.hpp"
+#include "utils/Logger.hpp"
+#include "utils/StringUtils.hpp"
+#include "core/Config.hpp"
+#include "network/SocketEngine.hpp"
 #include <iostream>
+#include <set>
 
 Server::Server()
 {   
@@ -18,18 +23,69 @@ Server::~Server()
 
 bool Server::loadConfig(int argc, char **argv)
 {
-    std::cout << "Loading config..." << std::endl;
-    (void)argc;
-    (void)argv;
-    std::cout << "Config loaded." << std::endl;
+    std::string config_path = "config/default.conf";
+
+    if (argc == 2)
+        config_path = argv[1];
+    else if (argc > 2)
+    {
+        Logger::error("Too many arguments. Usage ./webserv [config_file]");
+        return false;
+    }
+
+    Logger::info("Loading config from: " + config_path);
+
+    if (!_config.loadConfig(config_path))
+    {
+        Logger::error("Failed to load configuration file.");
+        return false;
+    }
+
+    Logger::info("Config loaded successfully.");
     return true;
 }
 
 void Server::run()
 {
-    std::cout << "Server started" << std::endl;
-    EventLoop loop;
+    Logger::info("Starting up network engines...");
+    const std::vector<ServerConfig>& servers = _config.getServers();
+
+    std::set<int> unique_ports;
+    for (size_t i = 0; i < servers.size(); ++i)
+    {
+        unique_ports.insert(servers[i].port);
+    }
+
+    std::vector<SocketEngine*> engines;
+    
+    for (std::set<int>::iterator it = unique_ports.begin(); it != unique_ports.end(); ++it)
+    {
+        int current_port = *it;
+        SocketEngine* engine = new SocketEngine(current_port);
+    try
+    {
+        engine->init();
+        engines.push_back(engine);
+        Logger::info("Successfully initialized SocketEngine on port: " + StringUtils::to_string(current_port));
+    }
+    catch (const std::exception& e)
+    {
+        Logger::error(std::string("Failed to initialize SocketEngine on port ") + StringUtils::to_string(current_port) + ": " + e.what());
+        delete engine;
+    }
+    }
+    if (engines.empty())
+    {
+        Logger::error("No servers could be initialized. Shutting down.");
+        return;
+    }
+
+    EventLoop loop(engines, servers);
     loop.run();
+
+    for (size_t i = 0; i < engines.size(); ++i)
+        delete engines[i];
+
 }
 
 void Server::addConnection(Connection* conn)
