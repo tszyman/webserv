@@ -1,7 +1,10 @@
 #include "routing/Router.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "utils/Logger.hpp"
+#include "utils/StringUtils.hpp"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cstdio>
 #include <sys/stat.h>
 
@@ -137,11 +140,58 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 void Router::handleGet(const std::string& physicalPath, HttpResponse& response) const
 {
 	Logger::info("GET request for: " + physicalPath);
-	// TODO: Bartek will handle reading the static file and putting it into 'res' here
+	std::string targetPath = physicalPath;
+	struct stat pathStat;
+	if (stat(targetPath.c_str(), &pathStat) != 0)
+	{
+		Logger::warning("GET eRROR: File not found - " + targetPath);
+		response.setStatusCode(404);
+		response.setBody(ErrorPage::defaultBody(404));
+		return;
+	}
 
-	// For now, just return a dummy success so it compiles
+	if (S_ISDIR(pathStat.st_mode))
+	{
+		if (targetPath[targetPath.length() - 1] != '/')
+			targetPath += "/";
+		targetPath += "index.html";
+	}
+
+	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
+	{
+		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
+		// TODO: "Directorty listing (autoindex)" - Przemek
+		response.setStatusCode(403);
+		response.setBody(ErrorPage::defaultBody(403));
+		return;
+	}
+	// check permission for read
+	if (!(pathStat.st_mode & S_IRUSR))
+	{
+		Logger::warning("GET Error: Permission denied - " + targetPath);
+		response.setStatusCode(403);
+		response.setBody(ErrorPage::defaultBody(403));
+		return;
+	}
+
+	std::ifstream file(targetPath.c_str(), std::ios::in | std::ios::binary);
+	if (!file.is_open())
+	{
+		Logger::error("GET Error: Could not open file - " + targetPath);
+		response.setStatusCode(500);
+		response.setBody(ErrorPage::defaultBody(500));
+		return;
+	}
+
+	std::ostringstream ss;
+	ss << file.rdbuf();
+	file.close();
+
 	response.setStatusCode(200);
-	response.setBody(ErrorPage::defaultBody(200));
+	response.setHeader("Content-Length", StringUtils::to_string(ss.str().length()));
+	response.setHeader("Content-Type", getMimeType(targetPath));
+	response.setBody(ss.str());
+	Logger::info("GET Success: Loaded " + StringUtils::to_string(ss.str().length()) + " bytes from " + targetPath);
 }
 
 void Router::handlePost(const RequestParser& request, std::string& physicalPath, HttpResponse& response) const
@@ -155,4 +205,25 @@ void Router::handlePost(const RequestParser& request, std::string& physicalPath,
 	// For now, just return a dummy success so it compiles
 	response.setStatusCode(200);
 	response.setBody(ErrorPage::defaultBody(200));
+}
+
+std::string Router::getMimeType(const std::string& path) const
+{
+	size_t dotPos = path.find_last_of('.');
+	if (dotPos == std::string::npos)
+		return "application/octet-stream";
+	std::string ext = path.substr(dotPos);
+
+	if (ext == ".html" || ext == ".htm") return "text/html";
+	if (ext == ".css") return "text/css";
+	if (ext == ".js") return "application/javascript";
+	if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+	if (ext == ".png") return "image/png";
+	if (ext == ".gif") return "image/gif";
+	if (ext == ".ico") return "image/x-icon";
+	if (ext == ".txt") return "text/plain";
+	if (ext == ".json") return "application/json";
+	if (ext == ".pdf") return "application/pdf";
+
+	return "application/octet-stream";
 }
