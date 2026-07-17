@@ -24,6 +24,7 @@ class EventLoop
         EventLoop(const EventLoop& other);
         EventLoop& operator=(const EventLoop& other);
         const ServerConfig* matchServerConfig(const std::string& hostHeader) const;
+        size_t getMaxBodySizeForPort(int port) const;
 
     public:
         EventLoop(const std::vector<SocketEngine*>& engines, const std::vector<ServerConfig>& servers);
