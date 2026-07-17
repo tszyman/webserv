@@ -64,6 +64,7 @@ def compile_unit_tester():
 		"../src/filesystem/DirectoryListing.cpp",       # Autoindex
 		"../src/filesystem/FileSystem.cpp",       # Autoindex
 		"../src/filesystem/UploadHandler.cpp",       # Autoindex
+
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

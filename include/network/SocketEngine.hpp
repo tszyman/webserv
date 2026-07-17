@@ -25,8 +25,9 @@ class SocketEngine
         ~SocketEngine();
 
         void init();
-        Connection* acceptConnection();
+        Connection* acceptConnection(size_t maxBodySize);
         int getFd() const;        
+        int getPort() const;
 };
 
 #endif

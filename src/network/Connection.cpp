@@ -3,7 +3,7 @@
 #include "utils/StringUtils.hpp"
 #include <iostream>
 
-Connection::Connection(int fd) : _fd(fd)
+Connection::Connection(int fd, size_t maxBodySize) : _fd(fd), _parser(maxBodySize), _max_body_size(maxBodySize)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
     _last_activity = time(NULL);
@@ -40,7 +40,7 @@ void Connection::eraseSentData(size_t bytes)
 
 void Connection::reset()
 {
-    _parser = RequestParser();
+    _parser = RequestParser(_max_body_size);
     _response_buffer.clear();
     updateLastActivity();
 }

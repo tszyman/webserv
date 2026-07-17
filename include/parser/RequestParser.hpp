@@ -14,10 +14,11 @@ class RequestParser
 			STATE_HEADERS,
 			STATE_BODY,
 			STATE_COMPLETE,
+			STATE_PAYLOAD_TOO_LARGE,
 			STATE_ERROR
 		};
 		
-		RequestParser();
+		RequestParser(size_t maxBodySize);
 		
 		void feed(const char* data, size_t length);				//feed raw data from the socket into the parser
 		
@@ -56,6 +57,7 @@ class RequestParser
 		ChunkState _chunkState;
 		size_t _currentChunkSize;
 		std::string _chunkHexBuffer;
+		size_t _maxBodySize;
 
 		void determineBodyType();
 		void processBody(const char* data, size_t length);
