@@ -28,14 +28,22 @@ class TestEvaluationLiveServer(unittest.TestCase):
         cls.work_dir = tempfile.mkdtemp(prefix="webserv-live-", dir="/tmp")
         cls.root = os.path.join(cls.work_dir, "site")
         cls.vhost_root = os.path.join(cls.work_dir, "vhost")
+        cls.delete_root = os.path.join(cls.work_dir, "delete-target")
+        cls.upload_root = os.path.join(cls.work_dir, "uploads")
         os.makedirs(os.path.join(cls.root, "listing"))
         os.makedirs(cls.vhost_root)
+        os.makedirs(cls.delete_root)
+        os.makedirs(cls.upload_root)
         with open(os.path.join(cls.root, "index.html"), "w") as page:
             page.write("local test index\n")
         with open(os.path.join(cls.root, "listing", "visible.txt"), "w") as page:
             page.write("listed\n")
-        with open(os.path.join(cls.root, "delete-me.txt"), "w") as page:
+        with open(os.path.join(cls.root, "protected.txt"), "w") as page:
             page.write("remove me\n")
+        with open(os.path.join(cls.delete_root, "remove.txt"), "w") as page:
+            page.write("this file should be deleted\n")
+        with open(os.path.join(cls.work_dir, "outside.txt"), "w") as page:
+            page.write("private file outside the document root\n")
         with open(os.path.join(cls.vhost_root, "index.html"), "w") as page:
             page.write("virtual host index\n")
 
@@ -44,7 +52,7 @@ class TestEvaluationLiveServer(unittest.TestCase):
             config.write("""server {
     listen %d;
     server_name localhost;
-    client_max_body_size 64;
+    client_max_body_size 2048;
     location / {
         root %s;
         allowed_methods GET POST;
@@ -58,6 +66,16 @@ class TestEvaluationLiveServer(unittest.TestCase):
         root %s;
         allowed_methods POST;
     }
+    location /delete {
+        root %s;
+        allowed_methods DELETE;
+    }
+    location /upload {
+        root %s;
+        allowed_methods GET POST;
+        upload_enable on;
+        upload_store %s;
+    }
 }
 server {
     listen %d;
@@ -67,7 +85,8 @@ server {
         allowed_methods GET;
     }
 }
-""" % (cls.PORT, cls.root, cls.root, cls.root, cls.PORT, cls.vhost_root))
+""" % (cls.PORT, cls.root, cls.root, cls.root, cls.delete_root,
+       cls.upload_root, cls.upload_root, cls.PORT, cls.vhost_root))
 
         cls.server = run_tests.start_main_server(cls.config_path)
         cls.wait_until_listening()
@@ -133,10 +152,16 @@ server {
         self.assertTrue(response.startswith("HTTP/1.1 400"), response)
 
     def test_post_too_large(self):
-        body = "A" * 65
+        body = "A" * 2049
         response = self.send_raw_request(
-            "POST /post HTTP/1.1\r\nHost: localhost\r\nContent-Length: 65\r\n\r\n" + body)
+            "POST /post HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2049\r\n\r\n" + body)
         self.assertTrue(response.startswith("HTTP/1.1 413"), response)
+
+    def test_post_at_body_size_limit(self):
+        body = "A" * 2048
+        response = self.send_raw_request(
+            "POST /post HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2048\r\n\r\n" + body)
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
 
     def test_chunked_post(self):
         response = self.send_raw_request(
@@ -147,6 +172,10 @@ server {
     def test_not_found(self):
         response = self.send_raw_request("GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
         self.assertTrue(response.startswith("HTTP/1.1 404"), response)
+
+    def test_http_11_requires_host_header(self):
+        response = self.send_raw_request("GET / HTTP/1.1\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 400"), response)
 
     def test_virtual_host(self):
         response = self.send_raw_request("GET / HTTP/1.1\r\nHost: custom-server.local\r\n\r\n")
@@ -159,5 +188,51 @@ server {
         self.assertIn("visible.txt", response)
 
     def test_delete_is_forbidden_by_location_policy(self):
-        response = self.send_raw_request("DELETE /delete-me.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        response = self.send_raw_request("DELETE /protected.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
         self.assertTrue(response.startswith("HTTP/1.1 405"), response)
+
+    def test_delete_allowed_file(self):
+        response = self.send_raw_request("DELETE /delete/remove.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 202"), response)
+        self.assertFalse(os.path.exists(os.path.join(self.delete_root, "remove.txt")))
+
+    def upload_request(self, filename, content):
+        boundary = "WebservLiveTestBoundary"
+        body = (
+            "--%s\r\n"
+            "Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+            "Content-Type: text/plain\r\n\r\n"
+            "%s\r\n"
+            "--%s--\r\n" % (boundary, filename, content, boundary)
+        )
+        request = (
+            "POST /upload HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "Content-Type: multipart/form-data; boundary=%s\r\n"
+            "Content-Length: %d\r\n\r\n%s" % (boundary, len(body), body)
+        )
+        return self.send_raw_request(request)
+
+    def test_upload_creates_and_serves_file(self):
+        content = "uploaded through webserv\n"
+        response = self.upload_request("uploaded.txt", content)
+        self.assertTrue(response.startswith("HTTP/1.1 201"), response)
+
+        uploaded_path = os.path.join(self.upload_root, "uploaded.txt")
+        self.assertTrue(os.path.isfile(uploaded_path))
+        with open(uploaded_path, "r") as uploaded:
+            self.assertEqual(uploaded.read(), content)
+
+        response = self.send_raw_request("GET /upload/uploaded.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn(content, response)
+
+    def test_upload_rejects_unsafe_filename(self):
+        response = self.upload_request("../outside-upload.txt", "must not be written")
+        self.assertTrue(response.startswith("HTTP/1.1 400"), response)
+        self.assertFalse(os.path.exists(os.path.join(self.work_dir, "outside-upload.txt")))
+
+    def test_path_traversal_cannot_escape_document_root(self):
+        response = self.send_raw_request("GET /../outside.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertFalse(response.startswith("HTTP/1.1 200"), response)
+        self.assertNotIn("private file outside the document root", response)
