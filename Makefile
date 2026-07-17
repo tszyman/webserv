@@ -34,6 +34,7 @@ SRC_FILES = \
     http/StatusCodes.cpp \
 	http/HttpErrorPage.cpp \
 	http/Autoindex.cpp \
+	http/UploadHandler.cpp \
     \
     parser/RequestParser.cpp \
     parser/ChunkedDecoder.cpp \
@@ -46,8 +47,6 @@ SRC_FILES = \
     cgi/CgiEnv.cpp \
     \
     filesystem/FileSystem.cpp \
-    filesystem/DirectoryListing.cpp \
-    filesystem/UploadHandler.cpp \
     \
     utils/Logger.cpp \
     utils/StringUtils.cpp \
