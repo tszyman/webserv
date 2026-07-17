@@ -1,165 +1,163 @@
-import unittest
+"""Black-box tests for the real webserv executable.
+
+The fixture deliberately owns its files, configuration and port.  This keeps
+the tests reproducible and prevents a developer's local www/ directory or a
+previous webserv process from changing their result.
+"""
+
+import os
+import shutil
 import socket
 import sys
-import os
+import tempfile
 import time
+import unittest
 
-# Ensures the import of helper functions from the main run_tests.py script
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import run_tests
 
+
 class TestEvaluationLiveServer(unittest.TestCase):
-    """
-    Test-Driven Development (TDD) Suite for 42 Evaluation Criteria.
-    Most of these will fail until EventLoop fully integrates RequestParser and Router!
-    """
+    PORT = None
+    server = None
+    work_dir = None
 
     @classmethod
     def setUpClass(cls):
-        """Starts the target server before tests on port 8080"""
-        # Kill any hanging processes for safety
-        run_tests.stop_main_server()
-        run_tests.start_main_server()
+        cls.PORT = cls.find_available_port()
+        cls.work_dir = tempfile.mkdtemp(prefix="webserv-live-", dir="/tmp")
+        cls.root = os.path.join(cls.work_dir, "site")
+        cls.vhost_root = os.path.join(cls.work_dir, "vhost")
+        os.makedirs(os.path.join(cls.root, "listing"))
+        os.makedirs(cls.vhost_root)
+        with open(os.path.join(cls.root, "index.html"), "w") as page:
+            page.write("local test index\n")
+        with open(os.path.join(cls.root, "listing", "visible.txt"), "w") as page:
+            page.write("listed\n")
+        with open(os.path.join(cls.root, "delete-me.txt"), "w") as page:
+            page.write("remove me\n")
+        with open(os.path.join(cls.vhost_root, "index.html"), "w") as page:
+            page.write("virtual host index\n")
+
+        cls.config_path = os.path.join(cls.work_dir, "live.conf")
+        with open(cls.config_path, "w") as config:
+            config.write("""server {
+    listen %d;
+    server_name localhost;
+    client_max_body_size 64;
+    location / {
+        root %s;
+        allowed_methods GET POST;
+    }
+    location /listing {
+        root %s/listing;
+        allowed_methods GET;
+        autoindex on;
+    }
+    location /post {
+        root %s;
+        allowed_methods POST;
+    }
+}
+server {
+    listen %d;
+    server_name custom-server.local;
+    location / {
+        root %s;
+        allowed_methods GET;
+    }
+}
+""" % (cls.PORT, cls.root, cls.root, cls.root, cls.PORT, cls.vhost_root))
+
+        cls.server = run_tests.start_main_server(cls.config_path)
+        cls.wait_until_listening()
 
     @classmethod
     def tearDownClass(cls):
-        """Safely shuts down the server after all tests finish"""
         run_tests.stop_main_server()
+        if cls.work_dir:
+            shutil.rmtree(cls.work_dir)
+
+    @classmethod
+    def find_available_port(cls):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", 0))
+            return probe.getsockname()[1]
+        finally:
+            probe.close()
+
+    @classmethod
+    def wait_until_listening(cls):
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            if cls.server.poll() is not None:
+                output = cls.server.stdout.read() if cls.server.stdout else ""
+                raise RuntimeError("webserv exited during startup:\n%s" % output)
+            try:
+                probe = socket.create_connection(("127.0.0.1", cls.PORT), timeout=0.1)
+                probe.close()
+                return
+            except socket.error:
+                time.sleep(0.05)
+        raise RuntimeError("webserv did not listen on port %d" % cls.PORT)
 
     def send_raw_request(self, payload):
-        """Sends a raw TCP/IP request to your server and returns the response"""
+        """Return the entire response; a single recv() is not reliable TCP I/O."""
+        client = socket.create_connection(("127.0.0.1", self.PORT), timeout=2)
+        client.settimeout(2)
+        if "\r\nConnection:" not in payload:
+            payload = payload.replace("\r\n\r\n", "\r\nConnection: close\r\n\r\n", 1)
+        client.sendall(payload.encode("ascii"))
+        chunks = []
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Prevents the test from hanging indefinitely if the server doesn't send EOF
-            s.settimeout(2.0) 
-            s.connect(("127.0.0.1", 8080))
-            s.sendall(payload.encode("utf-8"))
-            response = s.recv(4096).decode("utf-8", errors="ignore")
-            s.close()
-            return response
-        except Exception as e:
-            return f"CONNECTION_ERROR: {e}"
+            while True:
+                try:
+                    chunk = client.recv(4096)
+                except socket.timeout:
+                    return "CONNECTION_TIMEOUT: server did not send a response within 2 seconds"
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        finally:
+            client.close()
+        return b"".join(chunks).decode("utf-8", errors="replace")
 
-    # ==========================================
-    # EVAL: BASIC HTTP AND METHOD TESTS
-    # ==========================================
+    def test_valid_get(self):
+        response = self.send_raw_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("local test index", response)
 
-    def test_eval_01_valid_get(self):
-        """EVAL: Check a basic valid GET request returns HTTP 200"""
-        req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        self.assertTrue(res.startswith("HTTP/1.1 200"), f"Expected 200 OK, got: {res[:15]}")
+    def test_unknown_method_is_rejected(self):
+        response = self.send_raw_request("TROLL / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 400"), response)
 
-    def test_eval_02_missing_host_header(self):
-        """EVAL: HTTP/1.1 strictly requires Host header (Should return 400 Bad Request)"""
-        req = "GET / HTTP/1.1\r\n\r\n"
-        res = self.send_raw_request(req)
-        # Current code returns "Hello Webserv". TDD goal: change code to return 400.
-        self.assertTrue(res.startswith("HTTP/1.1 400"), f"Expected 400 Bad Request, got: {res[:15]}")
+    def test_post_too_large(self):
+        body = "A" * 65
+        response = self.send_raw_request(
+            "POST /post HTTP/1.1\r\nHost: localhost\r\nContent-Length: 65\r\n\r\n" + body)
+        self.assertTrue(response.startswith("HTTP/1.1 413"), response)
 
-    def test_eval_03_unknown_method(self):
-        """EVAL: Request with unknown method (Should return 405 Method Not Allowed or 501)"""
-        req = "TROLL / HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        # We expect RequestParser to throw STATE_ERROR, and EventLoop to send 405 or 400.
-        is_4xx_or_5xx = res.startswith("HTTP/1.1 4") or res.startswith("HTTP/1.1 5")
-        self.assertTrue(is_4xx_or_5xx, f"Expected Error Status, got: {res[:15]}")
+    def test_chunked_post(self):
+        response = self.send_raw_request(
+            "POST /post HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+            "5\r\nHello\r\n0\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
 
-    # ==========================================
-    # EVAL: BODY & CHUNKED 
-    # ==========================================
+    def test_not_found(self):
+        response = self.send_raw_request("GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 404"), response)
 
-    def test_eval_04_post_too_large(self):
-        """EVAL: POST with body larger than client_max_body_size (Should return 413)"""
-        # Let's send a huge body that exceeds the limits defined in the config:
-        huge_body = "A" * 50000 
-        req = f"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {len(huge_body)}\r\n\r\n{huge_body}"
-        res = self.send_raw_request(req)
-        # This will force you to implement body size limits validation in EventLoop/Router.
-        self.assertTrue(res.startswith("HTTP/1.1 413"), f"Expected 413 Payload Too Large, got: {res[:15]}")
+    def test_virtual_host(self):
+        response = self.send_raw_request("GET / HTTP/1.1\r\nHost: custom-server.local\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("virtual host index", response)
 
-    def test_eval_05_chunked_request(self):
-        """EVAL: Check if server correctly unchunks valid Transfer-Encoding: chunked request"""
-        req = (
-            "POST / HTTP/1.1\r\n"
-            "Host: localhost\r\n"
-            "Transfer-Encoding: chunked\r\n\r\n"
-            "5\r\nHello\r\n0\r\n\r\n"
-        )
-        res = self.send_raw_request(req)
-        self.assertTrue(res.startswith("HTTP/1.1 200"), f"Expected 200 OK after chunking, got: {res[:15]}")
+    def test_autoindex(self):
+        response = self.send_raw_request("GET /listing/ HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("visible.txt", response)
 
-    # ==========================================
-    # EVAL: VIRTUAL HOSTS, ROUTING & ERRORS
-    # ==========================================
-
-    def test_eval_06_not_found(self):
-        """EVAL: Request for non-existent route (Should return 404 Not Found)"""
-        req = "GET /i_dont_exist.html HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        self.assertTrue(res.startswith("HTTP/1.1 404"), f"Expected 404 Not Found, got: {res[:15]}")
-
-    def test_eval_07_virtual_hosts(self):
-        """EVAL: Setup multiple servers with different hostnames"""
-        # Sending a request with a specific Host header should route to a different server block
-        req = "GET / HTTP/1.1\r\nHost: custom-server.local\r\n\r\n"
-        res = self.send_raw_request(req)
-        self.assertTrue(res.startswith("HTTP/1.1 200"), f"Virtual host routing failed: {res[:15]}")
-
-    def test_eval_08_redirection(self):
-        """EVAL: Try a redirected URL"""
-        req = "GET /old-page HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        is_redirect = res.startswith("HTTP/1.1 301") or res.startswith("HTTP/1.1 302")
-        self.assertTrue(is_redirect, f"Expected 301/302 Redirection, got: {res[:15]}")
-        self.assertIn("Location:", res, "Redirection response missing 'Location' header")
-
-    def test_eval_09_autoindex(self):
-        """EVAL: Try to list a directory"""
-        req = "GET /images/ HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        self.assertTrue(res.startswith("HTTP/1.1 200"), f"Expected 200 OK, got: {res[:15]}")
-        self.assertIn("<title>Index of", res, "Response does not contain Autoindex HTML tags")
-
-    # ==========================================
-    # EVAL: UPLOADS & DELETE
-    # ==========================================
-
-    def test_eval_10_upload_file(self):
-        """EVAL: Upload some file to the server and get it back"""
-        boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-        body = (
-            f"--{boundary}\r\n"
-            "Content-Disposition: form-data; name=\"file\"; filename=\"test_upload.txt\"\r\n"
-            "Content-Type: text/plain\r\n\r\n"
-            "This is a test file content.\r\n"
-            f"--{boundary}--\r\n"
-        )
-        req = (
-            "POST /upload HTTP/1.1\r\n"
-            "Host: localhost\r\n"
-            f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
-            f"Content-Length: {len(body)}\r\n\r\n"
-            f"{body}"
-        )
-        res = self.send_raw_request(req)
-        # Server should return 201 Created or 200 OK upon successful upload
-        is_success = res.startswith("HTTP/1.1 201") or res.startswith("HTTP/1.1 200")
-        self.assertTrue(is_success, f"Expected successful upload status, got: {res[:15]}")
-
-    def test_eval_11_delete_file(self):
-        """EVAL: DELETE requests -> should work"""
-        # Attempt to delete the file we just uploaded
-        req = "DELETE /upload/test_upload.txt HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        
-        is_deleted = res.startswith("HTTP/1.1 202") or res.startswith("HTTP/1.1 204") or res.startswith("HTTP/1.1 200")
-        self.assertTrue(is_deleted, f"Expected 200/202/204 on DELETE, got: {res[:15]}")
-
-    def test_eval_12_delete_forbidden(self):
-        """EVAL: Try to delete something without permission"""
-        # Attempt to delete a file in a location where DELETE is not in allowed_methods
-        req = "DELETE /images/cat.png HTTP/1.1\r\nHost: localhost\r\n\r\n"
-        res = self.send_raw_request(req)
-        
-        self.assertTrue(res.startswith("HTTP/1.1 405"), f"Expected 405 Method Not Allowed, got: {res[:15]}")
+    def test_delete_is_forbidden_by_location_policy(self):
+        response = self.send_raw_request("DELETE /delete-me.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 405"), response)

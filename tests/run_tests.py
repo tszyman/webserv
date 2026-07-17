@@ -5,6 +5,9 @@ import sys
 import time
 import unittest
 
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(TESTS_DIR)
+
 # ANSI Colors
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -31,10 +34,8 @@ class CustomTestResult(unittest.TextTestResult):
 
 def compile_main_project():
     print(f"{YELLOW}[*] Compiling main webserv project...{RESET}")
-    os.chdir("..")
-    subprocess.run(["make", "fclean"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    res = subprocess.run(["make"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    os.chdir("tests")
+    res = subprocess.run(["make"], cwd=PROJECT_DIR,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res.returncode == 0, res.stderr
 
 def compile_unit_tester():
@@ -62,35 +63,41 @@ def compile_unit_tester():
 		"../src/network/Poller.cpp",       # Poller
 		"../src/http/Autoindex.cpp",       # Autoindex
 		"../src/http/UploadHandler.cpp",   #Filesystem
+		"../src/filesystem/FileSystem.cpp",   #Filesystem
         "-o", "unit_tester"
     ]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    res = subprocess.run(cmd, cwd=TESTS_DIR,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res.returncode == 0, res.stderr
 
-def start_main_server():
-    """Helper used to start the actual server for full-feature integration testing"""
+def start_main_server(config_path, cwd=TESTS_DIR):
+    """Start the server with an explicit test configuration.
+
+    Live tests should create their own config and wait for readiness rather than
+    assuming that a fixed delay is enough for a server to boot.
+    """
     global SERVER_PROCESS
-    config_path = "default_test.conf"
-    if not os.path.exists(config_path):
-        with open(config_path, "w") as f:
-            f.write("server {\n    listen 8080;\n    server_name localhost;\n}")
-            
+    stop_main_server()
     SERVER_PROCESS = subprocess.Popen(
-        ["../webserv", config_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        [os.path.join(PROJECT_DIR, "webserv"), config_path], cwd=cwd,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
-    time.sleep(0.2) # Allow server to boot up
+    return SERVER_PROCESS
 
 def stop_main_server():
     """Helper to safely kill the live server process after integration testing"""
     global SERVER_PROCESS
     if SERVER_PROCESS and SERVER_PROCESS.poll() is None:
         SERVER_PROCESS.terminate()
-        SERVER_PROCESS.wait()
+        try:
+            SERVER_PROCESS.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            SERVER_PROCESS.kill()
+            SERVER_PROCESS.wait()
+    SERVER_PROCESS = None
 
 if __name__ == "__main__":
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(TESTS_DIR)
 
     main_compiled, main_err = compile_main_project()
     if not main_compiled:

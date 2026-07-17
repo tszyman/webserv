@@ -3,11 +3,13 @@ import subprocess
 
 class TestServerCore(unittest.TestCase):
 
-    def run_tester(self, component, *args):
+    def run_tester(self, component, *args, **kwargs):
         """Helper to invoke the compiled C++ engine and capture both stdout and stderr"""
-        cmd = ["./unit_tester", component] + list(args)
+        cwd = kwargs.get("cwd", ".")
+        binary = "./unit_tester" if cwd == "." else "./tests/unit_tester"
+        cmd = [binary, component] + list(args)
         res = subprocess.run(
-            cmd, 
+            cmd, cwd=cwd,
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE
         )
@@ -15,12 +17,14 @@ class TestServerCore(unittest.TestCase):
 
     def test_server_config_loader(self):
         """Verify that Server::loadConfig parses rules and returns true successfully"""
-        out, err = self.run_tester("server", "config")
+        # Server::loadConfig() uses config/default.conf relative to the project
+        # root, not the tests/ directory used by the main runner.
+        out, err = self.run_tester("server", "config", cwd="..")
         
         self.assertIn("SUCCESS_CONFIG", out)
         # Verify the logs from Server.cpp
-        self.assertIn("Loading config...", out)
-        self.assertIn("Config loaded.", out)
+        self.assertIn("Loading config from: config/default.conf", out)
+        self.assertIn("Config loaded successfully.", out)
 
     def test_server_connection_management(self):
         """Verify Server properly maps descriptors, cleans up instances, and prevents memory leaks"""

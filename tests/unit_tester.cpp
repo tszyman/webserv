@@ -261,7 +261,8 @@ else if (component == "socket") {
         // 1. Setup Router and mock configurations
         Router router;
         
-        LocationConfig imagesLoc("/images", "/var/www/data");
+        // This is a repository fixture, not a machine-specific /var path.
+        LocationConfig imagesLoc("/images", "../www/data");
         imagesLoc.addAllowedMethod("GET");
         imagesLoc.addAllowedMethod("DELETE");
         router.addLocation(imagesLoc);

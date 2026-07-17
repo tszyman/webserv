@@ -37,7 +37,6 @@ SRC_FILES = \
 	http/UploadHandler.cpp \
     \
     parser/RequestParser.cpp \
-    parser/ChunkedDecoder.cpp \
     \
     routing/Router.cpp \
     routing/LocationConfig.cpp \
