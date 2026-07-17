@@ -62,6 +62,7 @@ def compile_unit_tester():
 		"../src/core/Config.cpp",          # Config
 		"../src/network/Poller.cpp",       # Poller
 		"../src/http/Autoindex.cpp",       # Autoindex
+		"../src/filesystem/FileSystem.cpp", # FileSystem
         "-o", "unit_tester"
     ]
     res = subprocess.run(cmd, cwd=TESTS_DIR,
