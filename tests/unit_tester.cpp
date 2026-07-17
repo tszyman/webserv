@@ -17,6 +17,9 @@
 #include "routing/Router.hpp"
 #include "network/Poller.hpp"
 #include "http/Autoindex.hpp"
+#include "filesystem/DirectoryLicting.hpp"
+#include "filesystem/FileSystem.hpp"
+#include "filesystem/UploadHandler.hpp"
 #include <sys/wait.h>
 #include <fcntl.h>
 
