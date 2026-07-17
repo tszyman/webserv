@@ -1,6 +1,6 @@
 cgi_tester
 tester
-webserv_subject.pdf
+*.pdf
 obj/
 webserv
 __pycache__
