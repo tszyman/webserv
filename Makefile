@@ -34,6 +34,7 @@ SRC_FILES = \
     http/StatusCodes.cpp \
 	http/HttpErrorPage.cpp \
 	http/Autoindex.cpp \
+    http/UploadHandler.cpp\
     \
     parser/RequestParser.cpp \
     \
