@@ -17,9 +17,6 @@
 #include "routing/Router.hpp"
 #include "network/Poller.hpp"
 #include "http/Autoindex.hpp"
-#include "filesystem/DirectoryLicting.hpp"
-#include "filesystem/FileSystem.hpp"
-#include "filesystem/UploadHandler.hpp"
 #include <sys/wait.h>
 #include <fcntl.h>
 
@@ -262,7 +259,8 @@ else if (component == "socket") {
         // 1. Setup Router and mock configurations
         Router router;
         
-        LocationConfig imagesLoc("/images", "/var/www/data");
+        // This is a repository fixture, not a machine-specific /var path.
+        LocationConfig imagesLoc("/images", "../www/data");
         imagesLoc.addAllowedMethod("GET");
         imagesLoc.addAllowedMethod("DELETE");
         router.addLocation(imagesLoc);

@@ -15,7 +15,7 @@ class TestInfrastructure(unittest.TestCase):
         """Verify that running webserv stays alive without immediate crash"""
         # Start the server as a background process to avoid blocking the script
         process = subprocess.Popen(
-            ["../webserv"],
+            ["../webserv", "../config/default.conf"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -26,8 +26,7 @@ class TestInfrastructure(unittest.TestCase):
         # Check if the process terminated prematurely (poll() returns exit code if terminated)
         exit_code = process.poll()
         
-        if exit_code is not None:
-            self.assertLess(exit_code, 128, f"Server crashed immediately on startup! Exit code: {exit_code}")
+        self.assertIsNone(exit_code, f"Server exited immediately on startup with code {exit_code}")
         
         # Clean up the background process safely
         process.terminate()

@@ -36,7 +36,6 @@ SRC_FILES = \
 	http/Autoindex.cpp \
     \
     parser/RequestParser.cpp \
-    parser/ChunkedDecoder.cpp \
     \
     routing/Router.cpp \
     routing/LocationConfig.cpp \
@@ -46,8 +45,6 @@ SRC_FILES = \
     cgi/CgiEnv.cpp \
     \
     filesystem/FileSystem.cpp \
-    filesystem/DirectoryListing.cpp \
-    filesystem/UploadHandler.cpp \
     \
     utils/Logger.cpp \
     utils/StringUtils.cpp \
