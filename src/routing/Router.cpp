@@ -1,6 +1,7 @@
 #include "routing/Router.hpp"
 #include "http/Autoindex.hpp"
 #include "http/HttpErrorPage.hpp"
+#include "http/UploadHandler.hpp"
 #include "utils/Logger.hpp"
 #include "utils/StringUtils.hpp"
 #include <iostream>
@@ -8,6 +9,92 @@
 #include <sstream>
 #include <cstdio>
 #include <sys/stat.h>
+
+namespace
+{
+	bool isLocationPrefix(const std::string& uri, const std::string& locationPath)
+	{
+		if (uri.compare(0, locationPath.size(), locationPath) != 0)
+			return false;
+		if (locationPath == "/" || uri.size() == locationPath.size())
+			return true;
+		return locationPath[locationPath.size() - 1] == '/' || uri[locationPath.size()] == '/';
+	}
+
+	bool containsTraversal(const std::string& path)
+	{
+		std::string::size_type start = 0;
+		while (start <= path.size())
+		{
+			const std::string::size_type end = path.find('/', start);
+			const std::string part = path.substr(start, end - start);
+			if (part == "..")
+				return true;
+			if (end == std::string::npos)
+				break;
+			start = end + 1;
+		}
+		return false;
+	}
+
+	bool extractBoundary(const std::string& contentType, std::string& boundary)
+	{
+		const std::string marker = "boundary=";
+		const std::string::size_type markerPos = contentType.find(marker);
+		if (contentType.compare(0, 19, "multipart/form-data") != 0 || markerPos == std::string::npos)
+			return false;
+		boundary = contentType.substr(markerPos + marker.size());
+		const std::string::size_type semicolon = boundary.find(';');
+		if (semicolon != std::string::npos)
+			boundary.erase(semicolon);
+		if (boundary.size() >= 2 && boundary[0] == '"' && boundary[boundary.size() - 1] == '"')
+			boundary = boundary.substr(1, boundary.size() - 2);
+		return !boundary.empty() && boundary.find('\r') == std::string::npos && boundary.find('\n') == std::string::npos;
+	}
+
+	bool extractDispositionValue(const std::string& disposition, const std::string& key, std::string& value)
+	{
+		const std::string marker = key + "=";
+		const std::string::size_type pos = disposition.find(marker);
+		if (pos == std::string::npos)
+			return false;
+		const std::string::size_type begin = pos + marker.size();
+		if (begin >= disposition.size() || disposition[begin] != '"')
+			return false;
+		const std::string::size_type end = disposition.find('"', begin + 1);
+		if (end == std::string::npos)
+			return false;
+		value = disposition.substr(begin + 1, end - begin - 1);
+		return true;
+	}
+
+	bool parseMultipartFile(const std::string& body, const std::string& boundary, std::string& filename, std::string& fileBody)
+	{
+		const std::string opening = "--" + boundary + "\r\n";
+		const std::string separator = "\r\n\r\n";
+		const std::string closingPrefix = "\r\n--" + boundary;
+		if (body.compare(0, opening.size(), opening) != 0)
+			return false;
+		const std::string::size_type headersEnd = body.find(separator, opening.size());
+		if (headersEnd == std::string::npos)
+			return false;
+		const std::string headers = body.substr(opening.size(), headersEnd - opening.size());
+		const std::string dispositionName = "Content-Disposition:";
+		const std::string::size_type dispositionPos = headers.find(dispositionName);
+		if (dispositionPos == std::string::npos)
+			return false;
+		const std::string::size_type dispositionEnd = headers.find("\r\n", dispositionPos);
+		const std::string disposition = headers.substr(dispositionPos + dispositionName.size(), dispositionEnd - dispositionPos - dispositionName.size());
+		if (!extractDispositionValue(disposition, "filename", filename))
+			return false;
+		const std::string::size_type dataStart = headersEnd + separator.size();
+		const std::string::size_type dataEnd = body.find(closingPrefix, dataStart);
+		if (dataEnd == std::string::npos || body.compare(dataEnd + closingPrefix.size(), 2, "--") != 0)
+			return false;
+		fileBody.assign(body, dataStart, dataEnd - dataStart);
+		return true;
+	}
+}
 
 Router::Router() {}
 
@@ -27,7 +114,7 @@ const LocationConfig* Router::matchLocation(const std::string& uri) const
 		const std::string& locationPath = _locations[i].getPath();
 
 		//If the URI starts with the location path
-		if (uri.find(locationPath) == 0)
+		if (isLocationPrefix(uri, locationPath))
 		{
 			if (locationPath.length() > longestMatchLength)
 			{
@@ -72,6 +159,12 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setBody(ErrorPage::defaultBody(413));
 		return;
 	}
+	if (containsTraversal(request.getPath()))
+	{
+		Logger::warning("Router: rejected path traversal attempt: " + request.getPath());
+		response = ErrorPage::buildDefault(403);
+		return;
+	}
 
 	const LocationConfig* location = matchLocation(request.getPath());
 
@@ -101,7 +194,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (request.getMethod() == "GET"){
 		handleGet(request.getPath(), physicalPath, location, response);
 	} else if (request.getMethod() == "POST") {
-		handlePost(request, physicalPath, response);
+		handlePost(request, location, response);
 	} else if (request.getMethod() == "DELETE"){
 		handleDelete(physicalPath, response);
 	} else {
@@ -224,15 +317,29 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	Logger::info("GET Success: Loaded " + StringUtils::to_string(ss.str().length()) + " bytes from " + targetPath);
 }
 
-void Router::handlePost(const RequestParser& request, std::string& physicalPath, HttpResponse& response) const
+void Router::handlePost(const RequestParser& request, const LocationConfig* location, HttpResponse& response) const
 {
-	// Just to trick the compiler
-	(void)request;
-	
-	Logger::info("GET request for: " + physicalPath);
-	// TODO: To be completed when EventLoop and Polling is ready
+	if (location != NULL && location->isUploadEnabled())
+	{
+		const std::map<std::string, std::string>& headers = request.getHeaders();
+		std::map<std::string, std::string>::const_iterator contentType = headers.find("Content-Type");
+		std::string boundary;
+		std::string filename;
+		std::string fileBody;
+		const std::vector<char>& rawBody = request.getBody();
+		const std::string body(rawBody.begin(), rawBody.end());
 
-	// For now, just return a dummy success so it compiles
+		if (contentType == headers.end() || !extractBoundary(contentType->second, boundary)
+			|| !parseMultipartFile(body, boundary, filename, fileBody))
+		{
+			response = ErrorPage::buildDefault(400);
+			return;
+		}
+		UploadHandler::handleUpload(location->getUploadStore(), filename, fileBody, 0, response);
+		return;
+	}
+
+	// Preserve the previous generic POST behaviour for non-upload endpoints.
 	response.setStatusCode(200);
 	response.setBody(ErrorPage::defaultBody(200));
 }

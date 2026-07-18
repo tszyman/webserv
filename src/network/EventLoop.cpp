@@ -77,7 +77,8 @@ void EventLoop::run()
 			}
 		}
 
-		int ready_count = _poller.poll(2000);
+		// Keep queued responses responsive even when no additional socket event arrives.
+		int ready_count = _poller.poll(100);
 
 		if (ready_count < 0)
 		{
@@ -180,7 +181,11 @@ void EventLoop::run()
 					
 					const ServerConfig* current_config = matchServerConfig(host);
 
-					if (current_config != NULL)
+					if (conn->getParser().getVersion() == "HTTP/1.1" && host.empty())
+					{
+						ErrorPage::tryBuildDefault(400, response);
+					}
+					else if (current_config != NULL)
 					{
 						Router router;
 						for (size_t i = 0; i < current_config->locations.size(); ++i)
@@ -198,12 +203,12 @@ void EventLoop::run()
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
 				}
-				else if (state == RequestParser::STATE_ERROR)
+					else if (state == RequestParser::STATE_ERROR || state == RequestParser::STATE_PAYLOAD_TOO_LARGE)
 				{
 					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));
 
 					HttpResponse response;
-					ErrorPage::tryBuildDefault(400, response);
+						ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
 
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
@@ -236,7 +241,11 @@ void EventLoop::run()
 				if(conn->getResponseBuffer().empty())
 				{
 					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
-					bool keep_alive = true;
+					// A malformed or oversized request cannot safely be reused as a
+					// persistent connection: parsing may have stopped before all
+					// headers (including Connection) were read.
+					bool keep_alive = conn->getParser().getState() != RequestParser::STATE_ERROR
+						&& conn->getParser().getState() != RequestParser::STATE_PAYLOAD_TOO_LARGE;
 
 					std::map<std::string, std::string>::const_iterator it = headers.find("Connection");
 					if (it != headers.end() && it->second == "close")
@@ -252,11 +261,23 @@ void EventLoop::run()
 					}
 					else
 					{
-						Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
-						close(current_fd);
-						delete conn;
-						_connections.erase(current_fd);
-						_poller.removeFd(current_fd);
+						if (conn->getParser().getState() == RequestParser::STATE_ERROR
+							|| conn->getParser().getState() == RequestParser::STATE_PAYLOAD_TOO_LARGE)
+						{
+							// The client may still have request bytes in flight.  Half-close
+							// our write side after the error response so they receive it
+							// instead of a TCP reset caused by unread inbound data.
+							shutdown(current_fd, SHUT_WR);
+							_poller.setEvents(current_fd, POLLIN);
+						}
+						else
+						{
+							Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
+							close(current_fd);
+							delete conn;
+							_connections.erase(current_fd);
+							_poller.removeFd(current_fd);
+						}
 					}
 				}
 			}

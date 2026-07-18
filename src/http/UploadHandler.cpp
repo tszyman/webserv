@@ -47,7 +47,8 @@ bool UploadHandler::prepareTarget(const std::string &uploadDirectory, const std:
     const TargetStatus status = validateTarget(uploadDirectory, filename, targetPath);
     if (status == TARGET_OK)
         return true;
-    return ErrorPage::tryBuildDefault(httpSttusFor(status), errorResponse);
+    ErrorPage::tryBuildDefault(httpSttusFor(status), errorResponse);
+    return false;
 }
 
 bool UploadHandler::handleUpload(const std::string &uploadDirectory, const std::string &filename, const std::string &body, unsigned long maxBodySize, HttpResponse &response)
@@ -56,7 +57,8 @@ bool UploadHandler::handleUpload(const std::string &uploadDirectory, const std::
 
     if (!prepareTarget(uploadDirectory, filename, targetPath, response))
         return false;
-    if (body.size() > maxBodySize)
+    // A zero limit means unlimited, consistently with RequestParser.
+    if (maxBodySize != 0 && body.size() > maxBodySize)
     {
         ErrorPage::tryBuildDefault(413, response);
         return false;
@@ -138,7 +140,8 @@ bool UploadHandler::writeBodyToFile(const std::string &targetPath, const std::st
     int fd;
     std::string::size_type totalWritten;
 
-    fd = open(targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    // Do not follow a final-path symlink out of the configured upload store.
+    fd = open(targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
     if (fd < 0)
         return false;
     FdGuard guard(fd);
