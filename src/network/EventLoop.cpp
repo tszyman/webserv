@@ -203,7 +203,8 @@ void EventLoop::run()
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
 				}
-					else if (state == RequestParser::STATE_ERROR || state == RequestParser::STATE_PAYLOAD_TOO_LARGE)
+					else if (state == RequestParser::STATE_ERROR
+						|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))
 				{
 					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));
 
@@ -261,23 +262,11 @@ void EventLoop::run()
 					}
 					else
 					{
-						if (conn->getParser().getState() == RequestParser::STATE_ERROR
-							|| conn->getParser().getState() == RequestParser::STATE_PAYLOAD_TOO_LARGE)
-						{
-							// The client may still have request bytes in flight.  Half-close
-							// our write side after the error response so they receive it
-							// instead of a TCP reset caused by unread inbound data.
-							shutdown(current_fd, SHUT_WR);
-							_poller.setEvents(current_fd, POLLIN);
-						}
-						else
-						{
-							Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
-							close(current_fd);
-							delete conn;
-							_connections.erase(current_fd);
-							_poller.removeFd(current_fd);
-						}
+						Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
+						close(current_fd);
+						delete conn;
+						_connections.erase(current_fd);
+						_poller.removeFd(current_fd);
 					}
 				}
 			}
