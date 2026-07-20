@@ -38,8 +38,8 @@ bool RequestParser::parseRequestLine(const std::string &line)
 	_path = line.substr(pos1 + 1, pos2 - pos1 - 1);
 	_version = line.substr(pos2 + 1);
 
-	if(_method != "GET" && _method != "POST" && _method != "DELETE")
-		return false;
+	// if(_method != "GET" && _method != "POST" && _method != "DELETE")
+	// 	return false;
 
 	if(_version != "HTTP/1.1" && _version != "HTTP/1.0")
 		return false;
