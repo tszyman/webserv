@@ -1,8 +1,7 @@
 #include "cgi/CgiProcess.hpp"
 #include <iostream>
-// C++ Standard Library wrappers for C functions
 #include <cstdlib>
-#include <cstring>
+// C++ Standard Library wrappers for C functions
 // POSIX OS APIs (no C++ equvalent)
 #include <unistd.h> // for pipe, fork, execve, close, dup2
 #include <fcntl.h> // for fcntl, 0_NONBLOCK, FD_CLOEXEC
@@ -39,21 +38,15 @@ bool CgiProcess::execute(const std::string& scriptPath, const std::string& cgiEx
 		close(pipe_out[1]);
 
 		char* args[3];
-		args[0] = strdup(cgiExecutable.c_str());
-		args[1] = strdup(scriptPath.c_str());
+		args[0] = const_cast<char*>(cgiExecutable.c_str());
+		args[1] = const_cast<char*>(scriptPath.c_str());
 		args[2] = NULL;
-
-		size_t lastSlash = scriptPath.find_last_of('/');
-		if (lastSlash != std::string::npos)
-		{
-			std::string dir = scriptPath.substr(0, lastSlash);
-			chdir(dir.c_str());
-		}
 
 		execve(args[0], args, envp);
 
 		std::cerr << "Execve failed" << std::endl;
 		exit(1);
+		return false;
 
 	} else {
 		// PARENT PROCESS

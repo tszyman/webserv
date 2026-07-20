@@ -2,7 +2,8 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _autoindex(false), _uploadEnabled(false), _uploadStore("") {}
+_path(path), _root(root), _autoindex(false), _uploadEnabled(false), _uploadStore(""),
+_index("index.html"), _maxBodySize(0), _hasMaxBodySize(false), _cgiExtension(""), _cgiPath("") {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
@@ -50,3 +51,17 @@ const std::string& LocationConfig::getUploadStore() const
 {
 	return _uploadStore;
 }
+
+void LocationConfig::setIndex(const std::string& index) { _index = index; }
+void LocationConfig::setMaxBodySize(size_t maxBodySize) { _maxBodySize = maxBodySize; _hasMaxBodySize = true; }
+void LocationConfig::setCgi(const std::string& extension, const std::string& executable)
+{
+	_cgiExtension = extension;
+	_cgiPath = executable;
+}
+const std::string& LocationConfig::getIndex() const { return _index; }
+bool LocationConfig::hasMaxBodySize() const { return _hasMaxBodySize; }
+size_t LocationConfig::getMaxBodySize() const { return _maxBodySize; }
+bool LocationConfig::isCgiEnabled() const { return !_cgiExtension.empty() && !_cgiPath.empty(); }
+const std::string& LocationConfig::getCgiExtension() const { return _cgiExtension; }
+const std::string& LocationConfig::getCgiPath() const { return _cgiPath; }

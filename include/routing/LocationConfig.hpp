@@ -13,6 +13,9 @@ class LocationConfig {
 		// Setters for optional config directives
 		void setAutoindex(bool enabled);
 		void setUpload(bool enabled, const std::string& storePath = "");
+		void setIndex(const std::string& index);
+		void setMaxBodySize(size_t maxBodySize);
+		void setCgi(const std::string& extension, const std::string& executable);
 
 		bool isMethodAllowed(const std::string& method) const;
 		const std::string& getPath() const;
@@ -20,6 +23,12 @@ class LocationConfig {
 		bool getAutoindex() const;
 		bool isUploadEnabled() const;
 		const std::string& getUploadStore() const;
+		const std::string& getIndex() const;
+		bool hasMaxBodySize() const;
+		size_t getMaxBodySize() const;
+		bool isCgiEnabled() const;
+		const std::string& getCgiExtension() const;
+		const std::string& getCgiPath() const;
 
 	private:
 		std::string _path; // e.g. "/images/"
@@ -29,6 +38,11 @@ class LocationConfig {
 		bool _autoindex;
 		bool _uploadEnabled;
 		std::string _uploadStore;
+		std::string _index;
+		size_t _maxBodySize;
+		bool _hasMaxBodySize;
+		std::string _cgiExtension;
+		std::string _cgiPath;
 };
 
 #endif // LOCATIONCONFIG_HPP

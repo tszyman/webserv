@@ -1,6 +1,20 @@
 #include "cgi/CgiEnv.hpp"
-#include <cstdlib>
-#include <cstring>
+
+namespace
+{
+	char *duplicateString(const std::string& value)
+	{
+		char *copy = new char[value.size() + 1];
+		for (size_t i = 0; i < value.size(); ++i) copy[i] = value[i];
+		copy[value.size()] = '\0';
+		return copy;
+	}
+
+	char toUpperAscii(char c)
+	{
+		return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+	}
+}
 
 CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _envp(NULL) {
 	// 1. Standard CGI variables
@@ -34,7 +48,7 @@ CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _e
 		{
 			if (key[i] == '-')
 				key[i] = '_';
-			key[i] = ::toupper(key[i]);
+			key[i] = toUpperAscii(key[i]);
 		}
 		_envMap[key] = it->second;
 	}
@@ -42,11 +56,11 @@ CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _e
 	// Specific handling for Content-Length and Content-Path
 	if (headers.count("Content-Length"))
 	{
-		_envMap["CONTENT_LENGTH"] = headers.at("Content-Length");
+		_envMap["CONTENT_LENGTH"] = headers.find("Content-Length")->second;
 	}
 	if (headers.count("Content-Type"))
 	{
-		_envMap["CONTENT_TYPE"] = headers.at("Content-Type");
+		_envMap["CONTENT_TYPE"] = headers.find("Content-Type")->second;
 	}
 
 	_buildEnvpArray();
@@ -57,7 +71,7 @@ CgiEnv::~CgiEnv() {
 	{
 		for (size_t i = 0; _envp[i] != NULL; ++i)
 		{
-			std::free(_envp[i]);
+			delete[] _envp[i];
 		}
 		delete[] _envp;
 	}
@@ -68,8 +82,8 @@ void CgiEnv::_buildEnvpArray() {
 	size_t i = 0;
 	for (std::map<std::string, std::string>::iterator it = _envMap.begin(); it != _envMap.end(); ++it)
 	{
-		std::string envString = it->first + "=" = it->second;
-		_envp[i] = strdup(envString.c_str());
+		std::string envString = it->first + "=" + it->second;
+		_envp[i] = duplicateString(envString);
 		i++;
 	}
 	_envp[i] = NULL;

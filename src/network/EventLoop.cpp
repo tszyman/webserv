@@ -3,6 +3,8 @@
 #include "utils/StringUtils.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpResponse.hpp"
+#include <sys/wait.h>
+#include <cerrno>
 
 EventLoop::EventLoop(const std::vector<SocketEngine*>& engines, const std::vector<ServerConfig>& servers)
 	: _is_running(true), _server_engines(engines), _servers(servers)
@@ -16,9 +18,134 @@ EventLoop::EventLoop(const std::vector<SocketEngine*>& engines, const std::vecto
 
 EventLoop::~EventLoop()
 {
+	for (std::map<int, CgiSession*>::iterator it = _cgiByClient.begin(); it != _cgiByClient.end(); ++it)
+		destroyCgi(it->second);
+	_cgiByClient.clear();
+	_cgiByFd.clear();
 	for(std::map<int, Connection*>::iterator it = _connections.begin(); it != _connections.end(); ++it)
 		delete it->second;
 	_connections.clear(); 
+}
+
+void EventLoop::startCgi(Connection *connection, const RequestParser& request, const std::string& scriptPath, const std::string& executable)
+{
+	CgiSession *session = new CgiSession();
+	session->clientFd = connection->getFd();
+	session->handler = new CgiHandler();
+	const std::vector<char>& body = request.getBody();
+	session->input.assign(body.begin(), body.end());
+	if (!session->handler->init(request, scriptPath, executable))
+	{
+		delete session->handler;
+		delete session;
+		HttpResponse response;
+		ErrorPage::tryBuildDefault(500, response);
+		connection->appendResponse(response.toString());
+		_poller.setEvents(connection->getFd(), POLLIN | POLLOUT);
+		return;
+	}
+	const int writeFd = session->handler->getWriteFd();
+	const int readFd = session->handler->getReadFd();
+	_cgiByClient[session->clientFd] = session;
+	_cgiByFd[writeFd] = session;
+	_cgiByFd[readFd] = session;
+	_poller.addFd(readFd, POLLIN);
+	if (session->input.empty())
+	{
+		close(writeFd);
+		_poller.removeFd(writeFd);
+		_cgiByFd.erase(writeFd);
+		session->writeClosed = true;
+	}
+	else
+		_poller.addFd(writeFd, POLLOUT);
+	_poller.setEvents(session->clientFd, 0);
+}
+
+void EventLoop::destroyCgi(CgiSession *session)
+{
+	if (session == NULL) return;
+	const int writeFd = session->handler->getWriteFd();
+	const int readFd = session->handler->getReadFd();
+	std::map<int, CgiSession*>::iterator writeIt = _cgiByFd.find(writeFd);
+	if (writeIt != _cgiByFd.end() && writeIt->second == session) { _poller.removeFd(writeFd); close(writeFd); _cgiByFd.erase(writeIt); }
+	std::map<int, CgiSession*>::iterator readIt = _cgiByFd.find(readFd);
+	if (readIt != _cgiByFd.end() && readIt->second == session) { _poller.removeFd(readFd); close(readFd); _cgiByFd.erase(readIt); }
+	_cgiByClient.erase(session->clientFd);
+	delete session->handler;
+	delete session;
+}
+
+void EventLoop::finishCgi(CgiSession *session)
+{
+	if (session == NULL || !session->readClosed) return;
+	std::map<int, Connection*>::iterator client = _connections.find(session->clientFd);
+	if (client != _connections.end())
+	{
+		int statusCode = 200;
+		std::string body = session->output;
+		HttpResponse response;
+		const std::string::size_type separator = session->output.find("\r\n\r\n");
+		if (separator != std::string::npos)
+		{
+			const std::string headers = session->output.substr(0, separator);
+			body = session->output.substr(separator + 4);
+			std::string::size_type lineStart = 0;
+			while (lineStart < headers.size())
+			{
+				const std::string::size_type lineEnd = headers.find("\r\n", lineStart);
+				const std::string line = headers.substr(lineStart, lineEnd - lineStart);
+				const std::string::size_type colon = line.find(':');
+				if (colon != std::string::npos)
+				{
+					const std::string key = line.substr(0, colon);
+					const std::string value = line.substr(colon + 1);
+					if (key == "Status") statusCode = std::atoi(value.c_str());
+					else if (key != "Content-Length") response.setHeader(key, value);
+				}
+				if (lineEnd == std::string::npos) break;
+				lineStart = lineEnd + 2;
+			}
+		}
+		response.setStatusCode(statusCode);
+		response.setBody(body);
+		response.setHeader("Content-Length", HttpResponse::numberToString(body.size()));
+		client->second->appendResponse(response.toString());
+		_poller.setEvents(session->clientFd, POLLIN | POLLOUT);
+	}
+	if (session->handler->getPid() > 0) waitpid(session->handler->getPid(), NULL, WNOHANG);
+	destroyCgi(session);
+}
+
+void EventLoop::handleCgiFd(int fd, short revents)
+{
+	std::map<int, CgiSession*>::iterator found = _cgiByFd.find(fd);
+	if (found == _cgiByFd.end()) return;
+	CgiSession *session = found->second;
+	if (fd == session->handler->getWriteFd() && (revents & POLLOUT))
+	{
+		const ssize_t sent = write(fd, session->input.data() + session->inputOffset, session->input.size() - session->inputOffset);
+		if (sent > 0) session->inputOffset += static_cast<size_t>(sent);
+		if (sent < 0 || session->inputOffset == session->input.size())
+		{
+			_poller.removeFd(fd); close(fd); _cgiByFd.erase(fd); session->writeClosed = true;
+		}
+	}
+	if (fd == session->handler->getReadFd() && (revents & (POLLIN | POLLHUP)))
+	{
+		char buffer[4096];
+		ssize_t count = read(fd, buffer, sizeof(buffer));
+		while (count > 0)
+		{
+			session->output.append(buffer, static_cast<size_t>(count));
+			count = read(fd, buffer, sizeof(buffer));
+		}
+		if (count == 0 || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK))
+		{
+			_poller.removeFd(fd); close(fd); _cgiByFd.erase(fd); session->readClosed = true;
+			finishCgi(session);
+		}
+	}
 }
 
 size_t EventLoop::getMaxBodySizeForPort(int port) const
@@ -93,6 +220,11 @@ void EventLoop::run()
 	{
 		int current_fd = fds[i].fd;
 		short revents = fds[i].revents;
+		if (_cgiByFd.find(current_fd) != _cgiByFd.end())
+		{
+			handleCgiFd(current_fd, revents);
+			continue;
+		}
 
 		bool is_server_socket = false;
 		SocketEngine* active_engine = NULL;
@@ -127,8 +259,7 @@ void EventLoop::run()
 		{
 			if (is_server_socket)
 			{
-				size_t max_body_size = getMaxBodySizeForPort(active_engine->getPort());
-				Connection* new_conn = active_engine->acceptConnection(max_body_size);
+				Connection* new_conn = active_engine->acceptConnection(0);
 				if (new_conn != NULL)
 				{
 					int client_fd = new_conn->getFd();
@@ -187,12 +318,19 @@ void EventLoop::run()
 					}
 					else if (current_config != NULL)
 					{
-						Router router;
+						Router router(current_config->clientMaxBodySize);
 						for (size_t i = 0; i < current_config->locations.size(); ++i)
 						{
 							router.addLocation(current_config->locations[i]);
 						}
 
+						std::string scriptPath;
+						std::string executable;
+						if (router.getCgiTarget(conn->getParser(), scriptPath, executable))
+						{
+							startCgi(conn, conn->getParser(), scriptPath, executable);
+							continue;
+						}
 						router.route(conn->getParser(), response);
 					}
 					else

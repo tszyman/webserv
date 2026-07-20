@@ -96,7 +96,7 @@ namespace
 	}
 }
 
-Router::Router() {}
+Router::Router(size_t serverMaxBodySize) : _serverMaxBodySize(serverMaxBodySize) {}
 
 void Router::addLocation(const LocationConfig& location)
 {
@@ -177,6 +177,12 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setBody(ErrorPage::defaultBody(404));
 		return;
 	}
+	const size_t maxBodySize = location->hasMaxBodySize() ? location->getMaxBodySize() : _serverMaxBodySize;
+	if (maxBodySize != 0 && request.getBody().size() > maxBodySize)
+	{
+		response = ErrorPage::buildDefault(413);
+		return;
+	}
 
 	// 2. Handle 405 Method Not Allowed
 	if (!location->isMethodAllowed(request.getMethod()))
@@ -255,7 +261,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 		indexPath = targetPath;
 		if (indexPath[indexPath.length() - 1] != '/')
 			indexPath += "/";
-		indexPath += "index.html";
+		indexPath += location->getIndex();
 		hasIndexFile = (stat(indexPath.c_str(), &indexStat) == 0 && !S_ISDIR(indexStat.st_mode));
 		if (hasIndexFile)
 		{
@@ -315,6 +321,28 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	response.setHeader("Content-Type", getMimeType(targetPath));
 	response.setBody(ss.str());
 	Logger::info("GET Success: Loaded " + StringUtils::to_string(ss.str().length()) + " bytes from " + targetPath);
+}
+
+bool Router::getCgiTarget(const RequestParser& request, std::string& scriptPath, std::string& executable) const
+{
+	if (request.getMethod() != "POST") return false;
+	for (size_t i = 0; i < _locations.size(); ++i)
+	{
+		const LocationConfig& location = _locations[i];
+		const std::string& extension = location.getCgiExtension();
+		if (!location.isCgiEnabled() || request.getPath().size() < extension.size()
+			|| request.getPath().compare(request.getPath().size() - extension.size(), extension.size(), extension) != 0)
+			continue;
+		if (!location.isMethodAllowed("POST")) return false;
+		scriptPath = location.getRoot();
+		if (!scriptPath.empty() && scriptPath[scriptPath.size() - 1] != '/') scriptPath += "/";
+		std::string requestPath = request.getPath();
+		if (!requestPath.empty() && requestPath[0] == '/') requestPath.erase(0, 1);
+		scriptPath += requestPath;
+		executable = location.getCgiPath();
+		return true;
+	}
+	return false;
 }
 
 void Router::handlePost(const RequestParser& request, const LocationConfig* location, HttpResponse& response) const

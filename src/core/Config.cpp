@@ -159,6 +159,11 @@ void Config::parseLocationBlock(ServerConfig& server)
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
+	std::string index = "index.html";
+	size_t maxBodySize = 0;
+	bool hasMaxBodySize = false;
+	std::string cgiExtension = "";
+	std::string cgiPath = "";
 
 	while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != "}")
 	{
@@ -208,6 +213,31 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expacted ';' after upload_store");
 		}
+		else if (directive == "index")
+		{
+			if (_currentTokenIndex >= _tokens.size()) throw std::runtime_error("Unexpected EOF after index");
+			index = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";") throw std::runtime_error("Expected ';' after index");
+		}
+		else if (directive == "client_max_body_size")
+		{
+			if (_currentTokenIndex >= _tokens.size()) throw std::runtime_error("Unexpected EOF after client_max_body_size");
+			maxBodySize = static_cast<size_t>(std::atoi(_tokens[_currentTokenIndex++].c_str()));
+			hasMaxBodySize = true;
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";") throw std::runtime_error("Expected ';' after client_max_body_size");
+		}
+		else if (directive == "cgi_extension")
+		{
+			if (_currentTokenIndex >= _tokens.size()) throw std::runtime_error("Unexpected EOF after cgi_extension");
+			cgiExtension = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";") throw std::runtime_error("Expected ';' after cgi_extension");
+		}
+		else if (directive == "cgi_path")
+		{
+			if (_currentTokenIndex >= _tokens.size()) throw std::runtime_error("Unexpected EOF after cgi_path");
+			cgiPath = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";") throw std::runtime_error("Expected ';' after cgi_path");
+		}
 		else
 		{
 			throw std::runtime_error("Unknown directive in location block: " + directive);
@@ -228,6 +258,13 @@ void Config::parseLocationBlock(ServerConfig& server)
 	if(uploadEnabled)
 	{
 		newLocation.setUpload(true,uploadStore);
+	}
+	newLocation.setIndex(index);
+	if (hasMaxBodySize) newLocation.setMaxBodySize(maxBodySize);
+	if (!cgiExtension.empty() || !cgiPath.empty())
+	{
+		if (cgiExtension.empty() || cgiPath.empty()) throw std::runtime_error("cgi_extension and cgi_path must be configured together");
+		newLocation.setCgi(cgiExtension, cgiPath);
 	}
 	server.locations.push_back(newLocation);
 }
