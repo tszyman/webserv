@@ -15,7 +15,6 @@ class EventLoop
 {
     private:
         Poller          _poller;
-        bool            _is_running;
 
         std::map<int, Connection*> _connections;
         std::vector<SocketEngine*> _server_engines;
@@ -27,6 +26,7 @@ class EventLoop
         size_t getMaxBodySizeForPort(int port) const;
 
     public:
+        static bool is_running;
         EventLoop(const std::vector<SocketEngine*>& engines, const std::vector<ServerConfig>& servers);
         ~EventLoop();
         void run();

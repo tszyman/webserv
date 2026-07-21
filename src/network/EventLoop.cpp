@@ -4,8 +4,10 @@
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpResponse.hpp"
 
+bool EventLoop::is_running = true;
+
 EventLoop::EventLoop(const std::vector<SocketEngine*>& engines, const std::vector<ServerConfig>& servers)
-	: _is_running(true), _server_engines(engines), _servers(servers)
+	: _server_engines(engines), _servers(servers)
 {
 	if(_server_engines.empty())
 		throw std::runtime_error("EventLoop initialized with empty SocketEngine list");
@@ -57,7 +59,7 @@ void EventLoop::run()
 	Logger::info("Starting the minimal event loop...");
 	const int TIMEOUT_LIMIT = 15;
 
-	while (_is_running)
+	while (EventLoop::is_running)
 	{
 		std::map<int, Connection*>::iterator it = _connections.begin();
 		while (it != _connections.end())
@@ -82,6 +84,11 @@ void EventLoop::run()
 
 		if (ready_count < 0)
 		{
+			if (!EventLoop::is_running)
+			{
+				Logger::info("Event loop terminated gracefully.");
+				break;
+			}
 			Logger::error("poll() failed. Exiting loop.");
 			break;
 		}
