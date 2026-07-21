@@ -28,6 +28,7 @@ class RequestParser
 		const std::string &getVersion() const;
 		const std::map<std::string, std::string> &getHeaders() const;
 		const std::vector<char> &getBody() const;
+		bool isOversizedBodyDrained() const;
 		
 	private:
 		enum BodyType{
@@ -58,9 +59,11 @@ class RequestParser
 		size_t _currentChunkSize;
 		std::string _chunkHexBuffer;
 		size_t _maxBodySize;
+		bool _oversizedBodyDrained;
 
 		void determineBodyType();
 		void processBody(const char* data, size_t length);
+		void drainOversizedBody(const char* data, size_t length);
 
 		std::string trim(const std::string &str);
 		bool parseRequestLine(const std::string &line);

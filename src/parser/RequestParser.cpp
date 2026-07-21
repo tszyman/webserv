@@ -7,7 +7,7 @@ RequestParser::RequestParser(size_t maxBodySize)
 	_method(), _path(), _version(), _headers(), _body(),
 	_headerBuffer(), _contentLength(0), _bytesRead(0),
 	_chunkState(CHUNK_SIZE), _currentChunkSize(0), _chunkHexBuffer(),
-	_maxBodySize(maxBodySize)
+	_maxBodySize(maxBodySize), _oversizedBodyDrained(false)
 {
 }
 
@@ -87,10 +87,6 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 			return false;
 
 		_contentLength = static_cast<size_t>(parsedLength);
-		if (_maxBodySize != 0 && _contentLength > _maxBodySize)
-		{
-			_state = STATE_PAYLOAD_TOO_LARGE;
-		}
 	}
 
 	_headers[key] = value;
@@ -120,6 +116,11 @@ const std::map<std::string, std::string> &RequestParser::getHeaders() const
 const std::vector<char> &RequestParser::getBody() const
 {
 	return _body;
+}
+
+bool RequestParser::isOversizedBodyDrained() const
+{
+	return _oversizedBodyDrained;
 }
 
 RequestParser::ParserState RequestParser::getState() const
@@ -152,6 +153,8 @@ void RequestParser::determineBodyType()
 		if (_maxBodySize != 0 && _contentLength > _maxBodySize)
 		{
 			_state = STATE_PAYLOAD_TOO_LARGE;
+			_bytesRead = 0;
+			_oversizedBodyDrained = (_contentLength == 0);
 			return;
 		}
 		_body.reserve(_contentLength);
@@ -171,6 +174,11 @@ void RequestParser::feed(const char* data, size_t length)
 {
 	if (_state == STATE_ERROR || _state == STATE_COMPLETE)
 		return;
+	if (_state == STATE_PAYLOAD_TOO_LARGE)
+	{
+		drainOversizedBody(data, length);
+		return;
+	}
 
 	size_t i = 0;
 	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
@@ -204,6 +212,22 @@ void RequestParser::feed(const char* data, size_t length)
 	{
 		processBody(data + i, length - i);
 	}
+	else if (_state == STATE_PAYLOAD_TOO_LARGE && i < length)
+	{
+		drainOversizedBody(data + i, length - i);
+	}
+}
+
+void RequestParser::drainOversizedBody(const char* data, size_t length)
+{
+	(void)data;
+	if (_bodyType != BODY_CONTENT_LENGTH || _oversizedBodyDrained)
+		return;
+	const size_t remaining = _contentLength - _bytesRead;
+	const size_t consumed = std::min(length, remaining);
+	_bytesRead += consumed;
+	if (_bytesRead == _contentLength)
+		_oversizedBodyDrained = true;
 }
 
 void RequestParser::processBody(const char* data, size_t length)
