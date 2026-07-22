@@ -220,8 +220,8 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	if (std::remove(physicalPath.c_str()) == 0)
 	{
 		Logger::info("DELETE Success: " +  physicalPath);
-		response.setStatusCode(202);
-		response.setBody(ErrorPage::defaultBody(204));
+		response.setStatusCode(204);
+		response.setBody("");
 	}
 	else
 	{

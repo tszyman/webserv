@@ -52,14 +52,29 @@ std::string HttpResponse::toString() const
     std::ostringstream output;
     HeaderMap::const_iterator it;
 
+    bool hasContentLength = false;
+    bool bodyAllowed = !(_statusCode >= 100 && _statusCode < 200) && _statusCode != 204 && _statusCode != 304;
+
     output << "HTTP/1.1 " << _statusCode << " "
            << HttpStatus::reasonPhrase(_statusCode) << "\r\n";
     for (it = _headers.begin(); it != _headers.end(); ++it)
+    {
+        if (it->first == "Content-Length")
+        {
+            hasContentLength = true;
+            continue;
+        }
         output << it->first << ": " << it->second << "\r\n";
+    }
+    if (bodyAllowed)
+        output << "Content-Length: " << _body.size() << "\r\n";
     if (_closeConnection)
         output << "Connection: close\r\n";
     output << "\r\n";
-    output << _body;
+
+    if (bodyAllowed)
+        output << _body;
+
     return output.str(); 
 }
 
