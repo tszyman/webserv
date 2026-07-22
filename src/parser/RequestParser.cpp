@@ -2,9 +2,36 @@
 #include <algorithm>
 #include <string>
 
+static bool isRecognizedMethod(const std::string& method)
+{
+	static const char* const knownMethods[] = {
+		"GET",
+		"POST",
+		"DELETE",
+		"HEAD",
+		"PUT",
+		"PATCH",
+		"OPTIONS",
+		"TRACE",
+		"CONNECT"
+	};
+
+	for (size_t i = 0; i < sizeof(knownMethods) / sizeof(knownMethods[0]); ++i)
+	{
+		if (method == knownMethods[i])
+			return true;
+	}
+	return false;
+}
+
+static bool isImplementedMethod(const std::string& method)
+{
+	return method == "GET" || method == "POST" || method == "DELETE";
+}
+
 RequestParser::RequestParser(size_t maxBodySize) 
 	: _state(STATE_REQUEST_LINE), _bodyType(BODY_NONE),
-	_method(), _path(), _version(), _headers(), _body(),
+	_methodState(METHOD_UNKNOWN), _method(), _path(), _version(), _headers(), _body(),
 	_headerBuffer(), _contentLength(0), _bytesRead(0),
 	_chunkState(CHUNK_SIZE), _currentChunkSize(0), _chunkHexBuffer(),
 	_maxBodySize(maxBodySize), _oversizedBodyDrained(false)
@@ -38,14 +65,18 @@ bool RequestParser::parseRequestLine(const std::string &line)
 	_path = line.substr(pos1 + 1, pos2 - pos1 - 1);
 	_version = line.substr(pos2 + 1);
 
-	// if(_method != "GET" && _method != "POST" && _method != "DELETE")
-	// 	return false;
-
 	if(_version != "HTTP/1.1" && _version != "HTTP/1.0")
 		return false;
 
-	if(_path.empty() || _path[0] != '/')
+	if(_method.empty() || _path.empty() || _path[0] != '/')
 		return false;
+
+	if (isImplementedMethod(_method))
+		_methodState = METHOD_IMPLEMENTED;
+	else if (isRecognizedMethod(_method))
+		_methodState = METHOD_UNIMPLEMENTED;
+	else
+		_methodState = METHOD_UNKNOWN;
 
 	return true;
 }
@@ -98,6 +129,11 @@ const std::string &RequestParser::getMethod() const
 	return _method;
 }
 
+RequestParser::MethodState RequestParser::getMethodState() const
+{
+	return _methodState;
+}
+
 const std::string &RequestParser::getPath() const
 {
 	return _path;
@@ -126,6 +162,15 @@ bool RequestParser::isOversizedBodyDrained() const
 RequestParser::ParserState RequestParser::getState() const
 {
 	return _state;
+}
+
+RequestParser::ParseState RequestParser::getParseState() const
+{
+	if (_state == STATE_COMPLETE)
+		return PARSE_SUCCESS;
+	if (_state == STATE_ERROR || _state == STATE_PAYLOAD_TOO_LARGE)
+		return PARSE_ERROR;
+	return PARSE_INCOMPLETE;
 }
 
 void RequestParser::determineBodyType()

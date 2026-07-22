@@ -173,9 +173,10 @@ void EventLoop::run()
 				Connection* conn = _connections[current_fd];
 				conn->updateLastActivity();
 				conn->getParser().feed(buffer, bytes_read);
+				RequestParser::ParseState parseState = conn->getParser().getParseState();
 				RequestParser::ParserState state = conn->getParser().getState();
 
-				if (state == RequestParser::STATE_COMPLETE)
+				if (parseState == RequestParser::PARSE_SUCCESS)
 				{
 					Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
 
@@ -210,7 +211,7 @@ void EventLoop::run()
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
 				}
-					else if (state == RequestParser::STATE_ERROR
+					else if (parseState == RequestParser::PARSE_ERROR
 						|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))
 				{
 					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));
