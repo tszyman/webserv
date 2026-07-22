@@ -57,6 +57,11 @@ class TestEvaluationLiveServer(unittest.TestCase):
         root %s;
         allowed_methods GET POST;
     }
+    location /limited {
+        root %s;
+        allowed_methods POST;
+        client_max_body_size 8;
+    }
     location /listing {
         root %s/listing;
         allowed_methods GET;
@@ -85,8 +90,8 @@ server {
         allowed_methods GET;
     }
 }
-""" % (cls.PORT, cls.root, cls.root, cls.root, cls.delete_root,
-       cls.upload_root, cls.upload_root, cls.PORT, cls.vhost_root))
+""" % (cls.PORT, cls.root, cls.root, cls.root, cls.root, cls.delete_root,
+    cls.upload_root, cls.upload_root, cls.PORT, cls.vhost_root))
 
         cls.server = run_tests.start_main_server(cls.config_path)
         cls.wait_until_listening()
@@ -162,6 +167,11 @@ server {
         response = self.send_raw_request(
             "POST /post HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2048\r\n\r\n" + body)
         self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+
+    def test_route_body_size_limit(self):
+        response = self.send_raw_request(
+            "POST /limited HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\nAAAAAAAAA")
+        self.assertTrue(response.startswith("HTTP/1.1 413"), response)
 
     def test_chunked_post(self):
         response = self.send_raw_request(

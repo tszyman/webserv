@@ -17,6 +17,7 @@ class TestConfigParser(unittest.TestCase):
 
                 location /api {
                     root /var/www/api;
+                    client_max_body_size 1024;
                     allowed_methods GET POST;
                     autoindex on;
                     upload_enable on;
@@ -54,6 +55,7 @@ class TestConfigParser(unittest.TestCase):
         # Check Location block rules
         self.assertIn("Loc Path: /api", out)
         self.assertIn("Loc Root: /var/www/api", out)
+        self.assertIn("Loc Max Body Size: 1024", out)
         self.assertIn("Autoindex: on", out)
         self.assertIn("Upload: on", out)
         self.assertIn("Upload Store: /var/www/uploads", out)

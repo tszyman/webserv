@@ -188,6 +188,13 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		return;
 	}
 
+	if (isBodyTooLarge(request, location))
+	{
+		Logger::warning("Router: request body too large for route " + location->getPath());
+		response = ErrorPage::buildDefault(413);
+		return;
+	}
+
 	// 3. Translate the path and route to the correct handler
 	std::string physicalPath = translatePath(request.getPath(), location);
 
@@ -202,6 +209,15 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setStatusCode(501);
 		response.setBody(ErrorPage::defaultBody(501));
 	}
+}
+
+bool Router::isBodyTooLarge(const RequestParser& request, const LocationConfig* location) const
+{
+	if (!location)
+		return false;
+	if (location->getClientMaxBodySize() == 0)
+		return false;
+	return request.getBody().size() > location->getClientMaxBodySize();
 }
 
 void Router::handleDelete(const std::string& physicalPath, HttpResponse& response) const
@@ -319,6 +335,12 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 
 void Router::handlePost(const RequestParser& request, const LocationConfig* location, HttpResponse& response) const
 {
+	if (isBodyTooLarge(request, location))
+	{
+		response = ErrorPage::buildDefault(413);
+		return;
+	}
+
 	if (location != NULL && location->isUploadEnabled())
 	{
 		const std::map<std::string, std::string>& headers = request.getHeaders();
