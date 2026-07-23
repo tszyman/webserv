@@ -179,6 +179,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
 	size_t clientMaxBodySize = 0;
+	bool clientMaxBodySizeSet = false;
 
 	while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != "}")
 	{
@@ -289,6 +290,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after client_max_body_size");
 			clientMaxBodySize = static_cast<size_t>(std::atoi(_tokens[_currentTokenIndex++].c_str()));
+			clientMaxBodySizeSet = true;
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after client_max_body_size directive");
 		}
@@ -320,6 +322,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 	{
 		newLocation.setUpload(true,uploadStore);
 	}
+	if (!clientMaxBodySizeSet)
+		clientMaxBodySize = server.clientMaxBodySize;
 	newLocation.setClientMaxBodySize(clientMaxBodySize);
 	server.locations.push_back(newLocation);
 }
