@@ -56,6 +56,18 @@ bool LocationConfig::isMethodAllowed(const std::string& method) const
 	return (std::find(_allowedMethods.begin(), _allowedMethods.end(), method) != _allowedMethods.end());
 }
 
+std::string LocationConfig::getAllowedMethodsHeader() const
+{
+	std::string methods;
+	for (size_t i = 0; i < _allowedMethods.size(); ++i)
+	{
+		if (i != 0)
+			methods += ", ";
+		methods += _allowedMethods[i];
+	}
+	return methods;
+}
+
 const std::string& LocationConfig::getPath() const
 {
 	return _path;

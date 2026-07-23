@@ -222,7 +222,7 @@ void EventLoop::run()
 					HttpResponse response;
 					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
 					std::string host = "";
-					std::map<std::string, std::string>::const_iterator it = headers.find("Host");
+					std::map<std::string, std::string>::const_iterator it = headers.find("host");
 					if (it != headers.end())
 						host = it->second;
 					
@@ -304,7 +304,7 @@ void EventLoop::run()
 					bool keep_alive = conn->getParser().getState() != RequestParser::STATE_ERROR
 						&& conn->getParser().getState() != RequestParser::STATE_PAYLOAD_TOO_LARGE;
 
-					std::map<std::string, std::string>::const_iterator it = headers.find("Connection");
+					std::map<std::string, std::string>::const_iterator it = headers.find("connection");
 					if (it != headers.end() && it->second == "close")
 					{
 						keep_alive = false;

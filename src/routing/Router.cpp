@@ -351,6 +351,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	{
 		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + requestPath);
 		response = buildErrorResponse(405, location);
+		response.setHeader("Allow", location->getAllowedMethodsHeader());
 		return;
 	}
 
@@ -375,8 +376,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		handleDelete(physicalPath, location, response);
 	} else {
 		// Handle 501 Not Implemented (for methods like PUT, PATCH if not implemented)
-		response.setStatusCode(501);
-		response.setBody(ErrorPage::defaultBody(501));
+		response = ErrorPage::buildDefault(501);
 	}
 }
 
@@ -563,7 +563,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 	if (location != NULL && location->isUploadEnabled())
 	{
 		const std::map<std::string, std::string>& headers = request.getHeaders();
-		std::map<std::string, std::string>::const_iterator contentType = headers.find("Content-Type");
+		std::map<std::string, std::string>::const_iterator contentType = headers.find("content-type");
 		std::string boundary;
 		std::string filename;
 		std::string fileBody;

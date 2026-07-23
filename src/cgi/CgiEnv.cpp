@@ -2,6 +2,13 @@
 #include <cstdlib>
 #include <cstring>
 
+static char toUpperAscii(char c)
+{
+	if (c >= 'a' && c <= 'z')
+		return static_cast<char>(c - 'a' + 'A');
+	return c;
+}
+
 CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _envp(NULL) {
 	// 1. Standard CGI variables
 	_envMap["GATEWAY_INTERFACE"] = "CGI/1.1";
@@ -9,19 +16,8 @@ CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _e
 	_envMap["SERVER_SOFTWARE"] = "webserv/1.0";
 	_envMap["REQUEST_METHOD"] = request.getMethod();
 
-	// Split path and query string
-	std::string fullPath = request.getPath();
-	size_t questionMarkPos = fullPath.find('?');
-	if (questionMarkPos != std::string::npos)
-	{
-		_envMap["PATH_INFO"] = fullPath.substr(0, questionMarkPos);
-		_envMap["QUERY_STRING"] = fullPath.substr(questionMarkPos + 1);
-	}
-	else
-	{
-		_envMap["PATH_INFO"] = fullPath;
-		_envMap["QUERY_STRING"] = "";
-	}
+	_envMap["PATH_INFO"] = request.getPath();
+	_envMap["QUERY_STRING"] = request.getQuery();
 
 	_envMap["SCRIPT_FILENAME"] = scriptPath;
 
@@ -34,20 +30,18 @@ CgiEnv::CgiEnv(const RequestParser& request, const std::string& scriptPath) : _e
 		{
 			if (key[i] == '-')
 				key[i] = '_';
-			key[i] = ::toupper(key[i]);
+			key[i] = toUpperAscii(key[i]);
 		}
 		_envMap[key] = it->second;
 	}
 
-	// Specific handling for Content-Length and Content-Path
-	if (headers.count("Content-Length"))
-	{
-		_envMap["CONTENT_LENGTH"] = headers.at("Content-Length");
-	}
-	if (headers.count("Content-Type"))
-	{
-		_envMap["CONTENT_TYPE"] = headers.at("Content-Type");
-	}
+	// CGI exposes these two entity headers without the HTTP_ prefix.
+	std::map<std::string, std::string>::const_iterator contentLength = headers.find("content-length");
+	if (contentLength != headers.end())
+		_envMap["CONTENT_LENGTH"] = contentLength->second;
+	std::map<std::string, std::string>::const_iterator contentType = headers.find("content-type");
+	if (contentType != headers.end())
+		_envMap["CONTENT_TYPE"] = contentType->second;
 
 	_buildEnvpArray();
 }
@@ -57,7 +51,7 @@ CgiEnv::~CgiEnv() {
 	{
 		for (size_t i = 0; _envp[i] != NULL; ++i)
 		{
-			std::free(_envp[i]);
+			delete[] _envp[i];
 		}
 		delete[] _envp;
 	}
@@ -68,8 +62,11 @@ void CgiEnv::_buildEnvpArray() {
 	size_t i = 0;
 	for (std::map<std::string, std::string>::iterator it = _envMap.begin(); it != _envMap.end(); ++it)
 	{
-		std::string envString = it->first + "=" = it->second;
-		_envp[i] = strdup(envString.c_str());
+		std::string envString = it->first + "=" + it->second;
+		_envp[i] = new char[envString.size() + 1];
+		for (size_t j = 0; j < envString.size(); ++j)
+			_envp[i][j] = envString[j];
+		_envp[i][envString.size()] = '\0';
 		i++;
 	}
 	_envp[i] = NULL;
