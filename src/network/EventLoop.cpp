@@ -145,6 +145,24 @@ void EventLoop::run()
 					Logger::info(std::string("Accepted and monitoring new client FD: ") + StringUtils::to_string(client_fd));
 				}
 			}
+			else if (_cgi_connections.find(current_fd) != _cgi_connections.end())
+			{
+				char cgi_buffer[4096];
+				ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
+				Connection* client_conn = _cgi_connections[current_fd];
+				if (bytes_read > 0)
+				{
+					client_conn->appendResponse(std::string(cgi_buffer, bytes_read));
+				}
+				else
+				{
+					Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
+					close(current_fd);
+					_poller.removeFd(current_fd);
+					_cgi_connections.erase(current_fd);
+					_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+				}
+			}
 		// B: Event on a client socket (Incoming data).
 		else
 		{
@@ -206,9 +224,18 @@ void EventLoop::run()
 					{
 						ErrorPage::tryBuildDefault(500, response);
 					}
-
+					if (response.isCgi())
+					{
+						int cgi_fd = response.getCgiReadFd();
+						_poller.addFd(cgi_fd, POLLIN);
+						_cgi_connections[cgi_fd] = conn;
+						Logger::info("Waiting for CGI output on FD: " + StringUtils::to_string(cgi_fd));
+					}
+					else
+					{
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
+					}
 				}
 					else if (state == RequestParser::STATE_ERROR
 						|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))

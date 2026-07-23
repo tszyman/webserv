@@ -3,6 +3,7 @@
 #include "http/HttpErrorPage.hpp"
 #include "http/UploadHandler.hpp"
 #include "utils/Logger.hpp"
+#include "cgi/CgiHandler.hpp"
 #include "utils/StringUtils.hpp"
 #include <iostream>
 #include <fstream>
@@ -243,7 +244,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
-		Logger::warning("GET eRROR: File not found - " + targetPath);
+		Logger::warning("GET Error: File not found - " + targetPath);
 		response.setStatusCode(404);
 		response.setBody(ErrorPage::defaultBody(404));
 		return;
@@ -339,9 +340,38 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 		return;
 	}
 
-	// Preserve the previous generic POST behaviour for non-upload endpoints.
-	response.setStatusCode(200);
-	response.setBody(ErrorPage::defaultBody(200));
+	std::string cgiExecutable = "";
+	std::string scriptPath = request.getPath();
+
+	if (location != NULL)
+	{
+		cgiExecutable = location->getPath();
+		if (!location->getRoot().empty())
+		{
+			scriptPath = location->getRoot() + request.getPath();
+		}
+	}
+
+	if (cgiExecutable.empty())
+	{
+		Logger::warning("POST request rejected: No CGI executable configured for this location.");
+		response = ErrorPage::buildDefault(403);
+		return;
+	}
+
+	Logger::info("CGI execution triggered for: " + scriptPath + " using executable: " + cgiExecutable);
+
+	CgiHandler cgi;
+	if (cgi.init(request, scriptPath, cgiExecutable))
+	{
+		response.setCgi(cgi.getReadFd(), cgi.getPid());
+	}
+	else
+	{
+		Logger::error("Failed to initialize CGI procerss.");
+		response = ErrorPage::buildDefault(500);
+	}
+
 }
 
 std::string Router::getMimeType(const std::string& path) const

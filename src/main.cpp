@@ -13,6 +13,7 @@ int main(int argc, char **argv)
 {
     signal(SIGINT, handle_sigint);
     signal(SIGQUIT, handle_sigint);
+    signal(SIGPIPE, SIG_IGN); // create if client disconnected and server try send something
 
     Server server;
 
