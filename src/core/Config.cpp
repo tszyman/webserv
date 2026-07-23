@@ -5,6 +5,18 @@
 #include <sstream>
 #include <cstdlib>
 
+static bool isInteger(const std::string& value)
+{
+	if (value.empty())
+		return false;
+	for (size_t i = 0; i < value.size(); ++i)
+	{
+		if (value[i] < '0' || value[i] > '9')
+			return false;
+	}
+	return true;
+}
+
 Config::Config() : _currentTokenIndex(0) {}
 Config::~Config() {}
 
@@ -156,10 +168,18 @@ void Config::parseLocationBlock(ServerConfig& server)
 	// Gathering variables first to satisfy LocationConfig's strict constructor
 	std::string root = "";
 	std::vector<std::string> allowedMethods;
+	std::vector<std::string> indexFiles;
+	int redirectStatusCode = 301;
+	std::string redirectTarget = "";
+	bool hasRedirect = false;
+	std::map<int, std::string> errorPages;
+	std::string cgiExtension = "";
+	std::string cgiExecutable = "";
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
 	size_t clientMaxBodySize = 0;
+	bool clientMaxBodySizeSet = false;
 
 	while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != "}")
 	{
@@ -209,11 +229,68 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expacted ';' after upload_store");
 		}
+		else if (directive == "index")
+		{
+			while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != ";")
+			{
+				indexFiles.push_back(_tokens[_currentTokenIndex++]);
+			}
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Expected ';' after index directive");
+			_currentTokenIndex++; // Skip ';'
+		}
+		else if (directive == "redirect")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after redirect");
+			if (!isInteger(_tokens[_currentTokenIndex]))
+				throw std::runtime_error("Expected numeric redirect status code");
+			redirectStatusCode = std::atoi(_tokens[_currentTokenIndex++].c_str());
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after redirect status code");
+			redirectTarget = _tokens[_currentTokenIndex++];
+			hasRedirect = true;
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after redirect directive");
+		}
+		else if (directive == "error_page")
+		{
+			while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != ";")
+			{
+				if (_currentTokenIndex + 1 >= _tokens.size() || _tokens[_currentTokenIndex + 1] == ";")
+					throw std::runtime_error("Expected error_page status/path pair");
+				const std::string statusToken = _tokens[_currentTokenIndex++];
+				const std::string pathToken = _tokens[_currentTokenIndex++];
+				if (!isInteger(statusToken))
+					throw std::runtime_error("Expected numeric status code for error_page");
+				errorPages[std::atoi(statusToken.c_str())] = pathToken;
+			}
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Expected ';' after error_page directive");
+			_currentTokenIndex++; // Skip ';'
+		}
+		else if (directive == "cgi_extension")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after cgi_extension");
+			cgiExtension = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after cgi_extension directive");
+		}
+		else if (directive == "cgi_executable")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after cgi_executable");
+			cgiExecutable = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after cgi_executable directive");
+		}
 		else if (directive == "client_max_body_size")
 		{
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after client_max_body_size");
 			clientMaxBodySize = static_cast<size_t>(std::atoi(_tokens[_currentTokenIndex++].c_str()));
+			clientMaxBodySizeSet = true;
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after client_max_body_size directive");
 		}
@@ -233,11 +310,20 @@ void Config::parseLocationBlock(ServerConfig& server)
 	{
 		newLocation.addAllowedMethod(allowedMethods[i]);
 	}
+	newLocation.setIndexFiles(indexFiles);
+	if (hasRedirect)
+		newLocation.setRedirect(redirectStatusCode, redirectTarget);
+	for (std::map<int, std::string>::const_iterator it = errorPages.begin(); it != errorPages.end(); ++it)
+		newLocation.addErrorPage(it->first, it->second);
+	if (!cgiExtension.empty() || !cgiExecutable.empty())
+		newLocation.setCgi(cgiExtension, cgiExecutable);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)
 	{
 		newLocation.setUpload(true,uploadStore);
 	}
+	if (!clientMaxBodySizeSet)
+		clientMaxBodySize = server.clientMaxBodySize;
 	newLocation.setClientMaxBodySize(clientMaxBodySize);
 	server.locations.push_back(newLocation);
 }

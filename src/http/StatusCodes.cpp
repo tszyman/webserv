@@ -4,6 +4,7 @@ const char *HttpStatus::reasonPhrase(int statusCode)
 {
     switch (statusCode)
     {
+        case 202: return "Accepted";
         case 200: return "OK";
         case 201: return "Created";
         case 204: return "No Content";
@@ -30,6 +31,7 @@ bool HttpStatus::isKnown(int statusCode)
 {
     switch (statusCode)
     {
+        case 202:
         case 200:
         case 201:
         case 204:
