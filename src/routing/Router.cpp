@@ -486,7 +486,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
-		Logger::warning("GET eRROR: File not found - " + targetPath);
+		Logger::warning("GET Error: File not found - " + targetPath);
 		response = buildErrorResponse(404, location);
 		return;
 	}
