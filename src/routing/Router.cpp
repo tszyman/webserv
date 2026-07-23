@@ -1,4 +1,5 @@
 #include "routing/Router.hpp"
+#include "cgi/CgiHandler.hpp"
 #include "http/Autoindex.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "http/UploadHandler.hpp"
@@ -8,7 +9,10 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static bool isLocationPrefix(const std::string& uri, const std::string& locationPath)
 {
@@ -133,6 +137,107 @@ static bool isRedirectStatus(int statusCode)
 	return statusCode >= 300 && statusCode < 400;
 }
 
+static std::string stripQueryString(const std::string& uri)
+{
+	std::string::size_type queryPos = uri.find('?');
+	if (queryPos == std::string::npos)
+		return uri;
+	return uri.substr(0, queryPos);
+}
+
+static bool hasExtension(const std::string& path, const std::string& extension)
+{
+	if (extension.empty())
+		return false;
+	if (path.length() < extension.length())
+		return false;
+	return path.compare(path.length() - extension.length(), extension.length(), extension) == 0;
+}
+
+static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
+{
+	std::string::size_type separator = rawOutput.find("\r\n\r\n");
+	std::string::size_type separatorLength = 4;
+	if (separator == std::string::npos)
+	{
+		separator = rawOutput.find("\n\n");
+		separatorLength = 2;
+	}
+
+	std::string headerBlock;
+	std::string body;
+	if (separator == std::string::npos)
+	{
+		body = rawOutput;
+	}
+	else
+	{
+		headerBlock = rawOutput.substr(0, separator);
+		body = rawOutput.substr(separator + separatorLength);
+	}
+
+	int statusCode = 200;
+	bool hasContentType = false;
+	std::string::size_type lineStart = 0;
+	while (lineStart < headerBlock.size())
+	{
+		std::string::size_type lineEnd = headerBlock.find("\n", lineStart);
+		std::string line;
+		if (lineEnd == std::string::npos)
+			line = headerBlock.substr(lineStart);
+		else
+			line = headerBlock.substr(lineStart, lineEnd - lineStart);
+		if (!line.empty() && line[line.length() - 1] == '\r')
+			line.erase(line.length() - 1);
+		if (!line.empty())
+		{
+			std::string::size_type colon = line.find(':');
+			if (colon != std::string::npos)
+			{
+				std::string key = line.substr(0, colon);
+				std::string value = line.substr(colon + 1);
+				while (!value.empty() && (value[0] == ' ' || value[0] == '\t'))
+					value.erase(0, 1);
+				if (key == "Status")
+				{
+					statusCode = std::atoi(value.c_str());
+				}
+				else if (key == "Content-Type")
+				{
+					response.setHeader("Content-Type", value);
+					hasContentType = true;
+				}
+				else
+				{
+					response.setHeader(key, value);
+				}
+			}
+		}
+		if (lineEnd == std::string::npos)
+			break;
+		lineStart = lineEnd + 1;
+	}
+
+	response.setStatusCode(statusCode);
+	response.setBody(body);
+	if (!hasContentType)
+		response.setHeader("Content-Type", "text/plain");
+	return true;
+}
+
+static bool writeAll(int fd, const char* data, size_t size)
+{
+	size_t totalWritten = 0;
+	while (totalWritten < size)
+	{
+		ssize_t written = write(fd, data + totalWritten, size - totalWritten);
+		if (written < 0)
+			return false;
+		totalWritten += static_cast<size_t>(written);
+	}
+	return true;
+}
+
 Router::Router() {}
 
 void Router::addLocation(const LocationConfig& location)
@@ -217,7 +322,9 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		return;
 	}
 
-	const LocationConfig* location = matchLocation(request.getPath());
+	const std::string requestPath = stripQueryString(request.getPath());
+
+	const LocationConfig* location = matchLocation(requestPath);
 
 	// 1. HAndle 404 Not Found
 	if (location == NULL)
@@ -241,7 +348,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	// 2. Handle 405 Method Not Allowed
 	if (!location->isMethodAllowed(request.getMethod()))
 	{
-		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + request.getPath());
+		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + requestPath);
 		response = buildErrorResponse(405, location);
 		return;
 	}
@@ -253,11 +360,14 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		return;
 	}
 
+	std::string physicalPath = translatePath(requestPath, location);
+	if (handleCgi(request, physicalPath, location, response))
+		return;
+
 	// 3. Translate the path and route to the correct handler
-	std::string physicalPath = translatePath(request.getPath(), location);
 
 	if (request.getMethod() == "GET"){
-		handleGet(request.getPath(), physicalPath, location, response);
+		handleGet(requestPath, physicalPath, location, response);
 	} else if (request.getMethod() == "POST") {
 		handlePost(request, location, response);
 	} else if (request.getMethod() == "DELETE"){
@@ -267,6 +377,67 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setStatusCode(501);
 		response.setBody(ErrorPage::defaultBody(501));
 	}
+}
+
+bool Router::handleCgi(const RequestParser& request, const std::string& physicalPath, const LocationConfig* location, HttpResponse& response) const
+{
+	if (location == NULL)
+		return false;
+	if (location->getCgiExtension().empty() || location->getCgiExecutable().empty())
+		return false;
+	if (!hasExtension(physicalPath, location->getCgiExtension()))
+		return false;
+
+	struct stat info;
+	if (stat(physicalPath.c_str(), &info) != 0 || S_ISDIR(info.st_mode))
+	{
+		response = buildErrorResponse(404, location);
+		return true;
+	}
+
+	CgiHandler cgi;
+	if (!cgi.init(request, physicalPath, location->getCgiExecutable()))
+	{
+		response = buildErrorResponse(500, location);
+		return true;
+	}
+
+	const std::vector<char>& body = request.getBody();
+	if (!body.empty())
+	{
+		if (!writeAll(cgi.getWriteFd(), &body[0], body.size()))
+		{
+			close(cgi.getWriteFd());
+			close(cgi.getReadFd());
+			waitpid(cgi.getPid(), NULL, 0);
+			response = buildErrorResponse(500, location);
+			return true;
+		}
+	}
+	close(cgi.getWriteFd());
+
+	int status = 0;
+	waitpid(cgi.getPid(), &status, 0);
+
+	int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
+	if (flags != -1)
+		fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
+
+	std::string output;
+	char buffer[1024];
+	ssize_t bytesRead = 0;
+	while ((bytesRead = read(cgi.getReadFd(), buffer, sizeof(buffer))) > 0)
+		output.append(buffer, static_cast<size_t>(bytesRead));
+	close(cgi.getReadFd());
+
+	if (output.empty())
+	{
+		response = buildErrorResponse(500, location);
+		return true;
+	}
+
+	parseCgiOutput(output, response);
+	return true;
 }
 
 bool Router::isBodyTooLarge(const RequestParser& request, const LocationConfig* location) const

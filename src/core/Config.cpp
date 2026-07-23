@@ -173,6 +173,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 	std::string redirectTarget = "";
 	bool hasRedirect = false;
 	std::map<int, std::string> errorPages;
+	std::string cgiExtension = "";
+	std::string cgiExecutable = "";
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
@@ -266,6 +268,22 @@ void Config::parseLocationBlock(ServerConfig& server)
 				throw std::runtime_error("Expected ';' after error_page directive");
 			_currentTokenIndex++; // Skip ';'
 		}
+		else if (directive == "cgi_extension")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after cgi_extension");
+			cgiExtension = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after cgi_extension directive");
+		}
+		else if (directive == "cgi_executable")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after cgi_executable");
+			cgiExecutable = _tokens[_currentTokenIndex++];
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after cgi_executable directive");
+		}
 		else if (directive == "client_max_body_size")
 		{
 			if (_currentTokenIndex >= _tokens.size())
@@ -295,6 +313,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 		newLocation.setRedirect(redirectStatusCode, redirectTarget);
 	for (std::map<int, std::string>::const_iterator it = errorPages.begin(); it != errorPages.end(); ++it)
 		newLocation.addErrorPage(it->first, it->second);
+	if (!cgiExtension.empty() || !cgiExecutable.empty())
+		newLocation.setCgi(cgiExtension, cgiExecutable);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)
 	{

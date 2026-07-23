@@ -2,7 +2,7 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _errorPages(), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
+_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _errorPages(), _cgiExtension(""), _cgiExecutable(""), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
@@ -25,6 +25,12 @@ void LocationConfig::setRedirect(int statusCode, const std::string& target)
 void LocationConfig::addErrorPage(int statusCode, const std::string& filePath)
 {
 	_errorPages[statusCode] = filePath;
+}
+
+void LocationConfig::setCgi(const std::string& extension, const std::string& executable)
+{
+	_cgiExtension = extension;
+	_cgiExecutable = executable;
 }
 
 void LocationConfig::setAutoindex(bool enabled)
@@ -83,6 +89,16 @@ const std::string& LocationConfig::getRedirectTarget() const
 const std::map<int, std::string>& LocationConfig::getErrorPages() const
 {
 	return _errorPages;
+}
+
+const std::string& LocationConfig::getCgiExtension() const
+{
+	return _cgiExtension;
+}
+
+const std::string& LocationConfig::getCgiExecutable() const
+{
+	return _cgiExecutable;
 }
 
 bool LocationConfig::getAutoindex() const
