@@ -93,6 +93,31 @@ static bool parseMultipartFile(const std::string& body, const std::string& bound
 	return true;
 }
 
+static bool resolveIndexFile(const std::string& directoryPath, const LocationConfig* location, std::string& resolvedPath)
+{
+	std::vector<std::string> indexFiles;
+	if (location != NULL && !location->getIndexFiles().empty())
+		indexFiles = location->getIndexFiles();
+	else
+		indexFiles.push_back("index.html");
+
+	for (size_t i = 0; i < indexFiles.size(); ++i)
+	{
+		std::string candidate = directoryPath;
+		if (!candidate.empty() && candidate[candidate.length() - 1] != '/')
+			candidate += "/";
+		candidate += indexFiles[i];
+
+		struct stat candidateStat;
+		if (stat(candidate.c_str(), &candidateStat) == 0 && !S_ISDIR(candidateStat.st_mode))
+		{
+			resolvedPath = candidate;
+			return true;
+		}
+	}
+	return false;
+}
+
 Router::Router() {}
 
 void Router::addLocation(const LocationConfig& location)
@@ -267,7 +292,6 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	struct stat pathStat;
 	struct stat indexStat;
 	bool requestIsDirectory = false;
-	bool hasIndexFile = false;
 
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
@@ -280,15 +304,11 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	requestIsDirectory = S_ISDIR(pathStat.st_mode);
 	if (requestIsDirectory)
 	{
-		indexPath = targetPath;
-		if (indexPath[indexPath.length() - 1] != '/')
-			indexPath += "/";
-		indexPath += "index.html";
-		hasIndexFile = (stat(indexPath.c_str(), &indexStat) == 0 && !S_ISDIR(indexStat.st_mode));
-		if (hasIndexFile)
+		if (resolveIndexFile(targetPath, location, indexPath))
 		{
 			targetPath = indexPath;
-			pathStat = indexStat;
+			if (stat(targetPath.c_str(), &indexStat) == 0)
+				pathStat = indexStat;
 		}
 		else if (location != NULL && location->getAutoindex())
 		{

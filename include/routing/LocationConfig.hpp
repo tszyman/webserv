@@ -9,6 +9,7 @@ class LocationConfig {
 		LocationConfig(const std::string& path, const std::string& root);
 
 		void addAllowedMethod(const std::string& method);
+		void setIndexFiles(const std::vector<std::string>& indexFiles);
 
 		// Setters for optional config directives
 		void setAutoindex(bool enabled);
@@ -18,6 +19,7 @@ class LocationConfig {
 		bool isMethodAllowed(const std::string& method) const;
 		const std::string& getPath() const;
 		const std::string& getRoot() const;
+		const std::vector<std::string>& getIndexFiles() const;
 		bool getAutoindex() const;
 		bool isUploadEnabled() const;
 		const std::string& getUploadStore() const;
@@ -27,6 +29,7 @@ class LocationConfig {
 		std::string _path; // e.g. "/images/"
 		std::string _root; // e.g. "/var/www/data"
 		std::vector<std::string> _allowedMethods; // e.g. ["GET", "DELETE"]
+		std::vector<std::string> _indexFiles;
 
 		bool _autoindex;
 		bool _uploadEnabled;

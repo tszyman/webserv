@@ -156,6 +156,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 	// Gathering variables first to satisfy LocationConfig's strict constructor
 	std::string root = "";
 	std::vector<std::string> allowedMethods;
+	std::vector<std::string> indexFiles;
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
@@ -209,6 +210,16 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if(_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expacted ';' after upload_store");
 		}
+		else if (directive == "index")
+		{
+			while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != ";")
+			{
+				indexFiles.push_back(_tokens[_currentTokenIndex++]);
+			}
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Expected ';' after index directive");
+			_currentTokenIndex++; // Skip ';'
+		}
 		else if (directive == "client_max_body_size")
 		{
 			if (_currentTokenIndex >= _tokens.size())
@@ -233,6 +244,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 	{
 		newLocation.addAllowedMethod(allowedMethods[i]);
 	}
+	newLocation.setIndexFiles(indexFiles);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)
 	{
