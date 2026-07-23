@@ -31,11 +31,70 @@ static bool isImplementedMethod(const std::string& method)
 
 RequestParser::RequestParser(size_t maxBodySize) 
 	: _state(STATE_REQUEST_LINE), _bodyType(BODY_NONE),
-	_methodState(METHOD_UNKNOWN), _method(), _path(), _version(), _headers(), _body(),
-	_headerBuffer(), _contentLength(0), _bytesRead(0),
+	_methodState(METHOD_UNKNOWN), _method(), _path(), _query(), _version(), _headers(), _body(),
+	_headerBuffer(), _contentLength(0), _bytesRead(0), _headerBytes(0),
 	_chunkState(CHUNK_SIZE), _currentChunkSize(0), _chunkHexBuffer(),
 	_maxBodySize(maxBodySize), _oversizedBodyDrained(false)
 {
+}
+
+char RequestParser::toLowerAscii(char c)
+{
+	if (c >= 'A' && c <= 'Z')
+		return static_cast<char>(c - 'A' + 'a');
+	return c;
+}
+
+std::string RequestParser::normalizeHeaderName(const std::string &value)
+{
+	std::string result(value);
+	for (size_t i = 0; i < result.size(); ++i)
+		result[i] = toLowerAscii(result[i]);
+	return result;
+}
+
+bool RequestParser::isTokenChar(char c)
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		|| (c >= '0' && c <= '9'))
+		return true;
+	return c == '!' || c == '#' || c == '$' || c == '%' || c == '&'
+		|| c == '\'' || c == '*' || c == '+' || c == '-' || c == '.'
+		|| c == '^' || c == '_' || c == '`' || c == '|' || c == '~';
+}
+
+bool RequestParser::parseDecimalSize(const std::string &value, size_t &result)
+{
+	result = 0;
+	if (value.empty())
+		return false;
+	for (size_t i = 0; i < value.size(); ++i)
+	{
+		if (value[i] < '0' || value[i] > '9'
+			|| result > (static_cast<size_t>(-1) - static_cast<size_t>(value[i] - '0')) / 10)
+			return false;
+		result = result * 10 + static_cast<size_t>(value[i] - '0');
+	}
+	return true;
+}
+
+bool RequestParser::parseHexSize(const std::string &value, size_t &result)
+{
+	result = 0;
+	if (value.empty())
+		return false;
+	for (size_t i = 0; i < value.size(); ++i)
+	{
+		size_t digit;
+		if (value[i] >= '0' && value[i] <= '9') digit = value[i] - '0';
+		else if (value[i] >= 'a' && value[i] <= 'f') digit = value[i] - 'a' + 10;
+		else if (value[i] >= 'A' && value[i] <= 'F') digit = value[i] - 'A' + 10;
+		else return false;
+		if (result > (static_cast<size_t>(-1) - digit) / 16)
+			return false;
+		result = result * 16 + digit;
+	}
+	return true;
 }
 
 std::string RequestParser::trim(const std::string &str)
@@ -71,6 +130,13 @@ bool RequestParser::parseRequestLine(const std::string &line)
 	if(_method.empty() || _path.empty() || _path[0] != '/')
 		return false;
 
+	const std::string::size_type queryPos = _path.find('?');
+	if (queryPos != std::string::npos)
+	{
+		_query = _path.substr(queryPos + 1);
+		_path.erase(queryPos);
+	}
+
 	if (isImplementedMethod(_method))
 		_methodState = METHOD_IMPLEMENTED;
 	else if (isRecognizedMethod(_method))
@@ -102,23 +168,16 @@ bool RequestParser::parseHeaderLine(const std::string &line)
 		return false;
  	}
 
-	size_t i = 0;
-	while(i < key.size())
-	{
-		if(key[i] == ' ' || key[i] == '\t')
-			return false;
-		i++;
-	}
-
-	if (key == "Content-Length")
-	{
-		char *endptr;
-		long parsedLength = std::strtol(value.c_str(), &endptr, 10);
-		if (endptr == value.c_str() || *endptr != '\0' || parsedLength < 0)
+	for (size_t i = 0; i < key.size(); ++i)
+		if (!isTokenChar(key[i]))
 			return false;
 
-		_contentLength = static_cast<size_t>(parsedLength);
-	}
+	key = normalizeHeaderName(key);
+	if ((key == "host" || key == "content-length" || key == "transfer-encoding")
+		&& _headers.find(key) != _headers.end())
+		return false;
+	if (key == "content-length" && !parseDecimalSize(value, _contentLength))
+		return false;
 
 	_headers[key] = value;
 	return true;
@@ -137,6 +196,11 @@ RequestParser::MethodState RequestParser::getMethodState() const
 const std::string &RequestParser::getPath() const
 {
 	return _path;
+}
+
+const std::string &RequestParser::getQuery() const
+{
+	return _query;
 }
 
 const std::string &RequestParser::getVersion() const
@@ -168,33 +232,37 @@ RequestParser::ParseState RequestParser::getParseState() const
 {
 	if (_state == STATE_COMPLETE)
 		return PARSE_SUCCESS;
-	if (_state == STATE_ERROR || _state == STATE_PAYLOAD_TOO_LARGE)
+	if (_state == STATE_ERROR || (_state == STATE_PAYLOAD_TOO_LARGE && _oversizedBodyDrained))
 		return PARSE_ERROR;
 	return PARSE_INCOMPLETE;
 }
 
 void RequestParser::determineBodyType()
 {
-	std::map<std::string, std::string>::const_iterator it = _headers.find("Transfer-Encoding");
-	if(it != _headers.end() && it->second.find("chunked") != std::string::npos)
+	const bool hasLength = _headers.find("content-length") != _headers.end();
+	const bool hasTransfer = _headers.find("transfer-encoding") != _headers.end();
+	if (hasLength && hasTransfer)
 	{
-		_bodyType = BODY_CHUNKED;
+		_state = STATE_ERROR;
 		return;
 	}
-	//If not chunked, check for Content-Length
-	it = _headers.find("Content-Length");
-	if(it != _headers.end())
+	std::map<std::string, std::string>::const_iterator it = _headers.find("transfer-encoding");
+	if (hasTransfer)
 	{
-		_bodyType = BODY_CONTENT_LENGTH;
-		char *endptr;
-		long parsedLength = std::strtol(it->second.c_str(), &endptr, 10);
-		if (endptr == it->second.c_str() || *endptr != '\0' || parsedLength < 0)
+		std::string transferEncoding = normalizeHeaderName(trim(it->second));
+		if (transferEncoding != "chunked")
 		{
 			_state = STATE_ERROR;
 			return;
 		}
-
-		_contentLength = static_cast<size_t>(parsedLength);
+		_bodyType = BODY_CHUNKED;
+		return;
+	}
+	//If not chunked, check for Content-Length
+	it = _headers.find("content-length");
+	if(hasLength)
+	{
+		_bodyType = BODY_CONTENT_LENGTH;
 		if (_maxBodySize != 0 && _contentLength > _maxBodySize)
 		{
 			_state = STATE_PAYLOAD_TOO_LARGE;
@@ -228,11 +296,21 @@ void RequestParser::feed(const char* data, size_t length)
 	size_t i = 0;
 	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
 	{
+		if (++_headerBytes > 32768)
+		{
+			_state = STATE_ERROR;
+			return;
+		}
 		_headerBuffer += data[i];
 		if(_headerBuffer.size() >= 2 && _headerBuffer.substr(_headerBuffer.size() - 2) == "\r\n")
 		{
 			std::string line = _headerBuffer.substr(0, _headerBuffer.size() - 2);
 			_headerBuffer.clear();
+			if (_state == STATE_REQUEST_LINE && line.size() > 8192)
+			{
+				_state = STATE_ERROR;
+				return;
+			}
 
 			if(line.empty())
 			{
@@ -304,19 +382,15 @@ void RequestParser::processBody(const char* data, size_t length)
 				if(_chunkHexBuffer.size() >= 2 && _chunkHexBuffer.substr(_chunkHexBuffer.size() - 2) == "\r\n")
 				{
 					std::string size_line = _chunkHexBuffer.substr(0, _chunkHexBuffer.size() - 2);
-					char* endptr;
-					long parsed_size = std::strtol(size_line.c_str(), &endptr, 16);
-					// Validation checks:
-					// 1. endptr == size_line.c_str() means no digits were parsed at all
-					// 2. *endptr != '\0' means there were training invalid chars (like 'Z')
-					// 3. parsed_size < 0 protects against overflow or negative values
-					if (endptr == size_line.c_str() || *endptr != '\0' || parsed_size < 0)
+					const std::string::size_type extensionPos = size_line.find(';');
+					if (extensionPos != std::string::npos)
+						size_line.erase(extensionPos);
+					if (!parseHexSize(size_line, _currentChunkSize))
 					{
 						_state = STATE_ERROR;
 					}
 					else
 					{
-						_currentChunkSize = static_cast<size_t>(std::strtol(size_line.c_str(), NULL, 16));
 						if (_maxBodySize != 0 && _body.size() + _currentChunkSize > _maxBodySize)
 						{
 							_state = STATE_PAYLOAD_TOO_LARGE;
