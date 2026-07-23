@@ -39,6 +39,7 @@ class RequestParser
 		const std::string &getMethod() const;
 		MethodState getMethodState() const;
 		const std::string &getPath() const;
+		const std::string &getQuery() const;
 		const std::string &getVersion() const;
 		const std::map<std::string, std::string> &getHeaders() const;
 		const std::vector<char> &getBody() const;
@@ -57,6 +58,7 @@ class RequestParser
 
 		std::string _method;
 		std::string _path;
+		std::string _query;
 		std::string _version;
 		std::map<std::string, std::string> _headers;
 		std::vector<char> _body;
@@ -64,6 +66,7 @@ class RequestParser
 		std::string _headerBuffer;
 		size_t _contentLength;
 		size_t _bytesRead;
+		size_t _headerBytes;
 		
 		enum ChunkState{
 			CHUNK_SIZE,
@@ -83,6 +86,11 @@ class RequestParser
 		std::string trim(const std::string &str);
 		bool parseRequestLine(const std::string &line);
 		bool parseHeaderLine(const std::string &line);
+		static char toLowerAscii(char c);
+		static std::string normalizeHeaderName(const std::string &value);
+		static bool isTokenChar(char c);
+		static bool parseDecimalSize(const std::string &value, size_t &result);
+		static bool parseHexSize(const std::string &value, size_t &result);
 };
 
 #endif

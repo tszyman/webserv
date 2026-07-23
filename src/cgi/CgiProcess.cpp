@@ -39,8 +39,10 @@ bool CgiProcess::execute(const std::string& scriptPath, const std::string& cgiEx
 		close(pipe_out[1]);
 
 		char* args[3];
-		args[0] = strdup(cgiExecutable.c_str());
-		args[1] = strdup(scriptPath.c_str());
+		// execve does not modify argv strings.  The std::string objects remain
+		// alive until execve replaces this child process.
+		args[0] = const_cast<char*>(cgiExecutable.c_str());
+		args[1] = const_cast<char*>(scriptPath.c_str());
 		args[2] = NULL;
 
 		size_t lastSlash = scriptPath.find_last_of('/');

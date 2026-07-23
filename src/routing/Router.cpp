@@ -153,8 +153,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (request.getState() == RequestParser::STATE_PAYLOAD_TOO_LARGE)
 	{
 		Logger::warning("Router: Payload too large.");
-		response.setStatusCode(413);
-		response.setBody(ErrorPage::defaultBody(413));
+		response = ErrorPage::buildDefault(413);
 		return;
 	}
 
@@ -185,9 +184,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (location == NULL)
 	{
 		Logger::info("Router: No location found for " + request.getPath());
-		response.setStatusCode(404);
-		// somehow here need to build 404 error page. Not sure if used interface properly
-		response.setBody(ErrorPage::defaultBody(404));
+		response = ErrorPage::buildDefault(404);
 		return;
 	}
 
@@ -195,9 +192,8 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (!location->isMethodAllowed(request.getMethod()))
 	{
 		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + request.getPath());
-		response.setStatusCode(405);
-		// somehow here need to build 405 error page. Not sure if used interface properly
-		response.setBody(ErrorPage::defaultBody(405));
+		response = ErrorPage::buildDefault(405);
+		response.setHeader("Allow", location->getAllowedMethodsHeader());
 		return;
 	}
 
@@ -219,8 +215,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		handleDelete(physicalPath, response);
 	} else {
 		// Handle 501 Not Implemented (for methods like PUT, PATCH if not implemented)
-		response.setStatusCode(501);
-		response.setBody(ErrorPage::defaultBody(501));
+		response = ErrorPage::buildDefault(501);
 	}
 }
 
@@ -240,8 +235,7 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	if (stat(physicalPath.c_str(), &buffer) != 0)
 	{
 		Logger::info("DELETE Error: File not found - " + physicalPath);
-		response.setStatusCode(404);
-		response.setBody(ErrorPage::defaultBody(404));
+		response = ErrorPage::buildDefault(404);
 		return;
 	}
 
@@ -255,8 +249,7 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	else
 	{
 		Logger::info("[INFO] DELETE Error: Forbidden/No Access - " + physicalPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = ErrorPage::buildDefault(403);
 	}
 }
 
@@ -273,8 +266,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
 		Logger::warning("GET Error: File not found - " + targetPath);
-		response.setStatusCode(404);
-		response.setBody(ErrorPage::defaultBody(404));
+		response = ErrorPage::buildDefault(404);
 		return;
 	}
 
@@ -313,16 +305,14 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
 	{
 		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = ErrorPage::buildDefault(403);
 		return;
 	}
 	// check permission for read
 	if (!(pathStat.st_mode & S_IRUSR))
 	{
 		Logger::warning("GET Error: Permission denied - " + targetPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = ErrorPage::buildDefault(403);
 		return;
 	}
 
@@ -330,8 +320,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (!file.is_open())
 	{
 		Logger::error("GET Error: Could not open file - " + targetPath);
-		response.setStatusCode(500);
-		response.setBody(ErrorPage::defaultBody(500));
+		response = ErrorPage::buildDefault(500);
 		return;
 	}
 
@@ -357,7 +346,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 	if (location != NULL && location->isUploadEnabled())
 	{
 		const std::map<std::string, std::string>& headers = request.getHeaders();
-		std::map<std::string, std::string>::const_iterator contentType = headers.find("Content-Type");
+		std::map<std::string, std::string>::const_iterator contentType = headers.find("content-type");
 		std::string boundary;
 		std::string filename;
 		std::string fileBody;
