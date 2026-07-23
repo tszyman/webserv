@@ -9,6 +9,18 @@
 class RequestParser
 {
 	public:
+		enum ParseState {
+			PARSE_INCOMPLETE,
+			PARSE_SUCCESS,
+			PARSE_ERROR
+		};
+
+		enum MethodState {
+			METHOD_UNKNOWN,
+			METHOD_UNIMPLEMENTED,
+			METHOD_IMPLEMENTED
+		};
+
 		enum ParserState{
 			STATE_REQUEST_LINE,
 			STATE_HEADERS,
@@ -22,8 +34,10 @@ class RequestParser
 		
 		void feed(const char* data, size_t length);				//feed raw data from the socket into the parser
 		
+		ParseState getParseState() const;
 		ParserState getState() const;
 		const std::string &getMethod() const;
+		MethodState getMethodState() const;
 		const std::string &getPath() const;
 		const std::string &getVersion() const;
 		const std::map<std::string, std::string> &getHeaders() const;
@@ -39,6 +53,7 @@ class RequestParser
 
 		ParserState _state;
 		BodyType _bodyType;
+		MethodState _methodState;
 
 		std::string _method;
 		std::string _path;
