@@ -16,6 +16,7 @@ class LocationConfig {
 		void setClientMaxBodySize(size_t maxBodySize);
 
 		bool isMethodAllowed(const std::string& method) const;
+		std::string getAllowedMethodsHeader() const;
 		const std::string& getPath() const;
 		const std::string& getRoot() const;
 		bool getAutoindex() const;
