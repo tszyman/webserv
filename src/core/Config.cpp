@@ -5,6 +5,18 @@
 #include <sstream>
 #include <cstdlib>
 
+static bool isInteger(const std::string& value)
+{
+	if (value.empty())
+		return false;
+	for (size_t i = 0; i < value.size(); ++i)
+	{
+		if (value[i] < '0' || value[i] > '9')
+			return false;
+	}
+	return true;
+}
+
 Config::Config() : _currentTokenIndex(0) {}
 Config::~Config() {}
 
@@ -160,6 +172,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 	int redirectStatusCode = 301;
 	std::string redirectTarget = "";
 	bool hasRedirect = false;
+	std::map<int, std::string> errorPages;
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
@@ -227,6 +240,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 		{
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after redirect");
+			if (!isInteger(_tokens[_currentTokenIndex]))
+				throw std::runtime_error("Expected numeric redirect status code");
 			redirectStatusCode = std::atoi(_tokens[_currentTokenIndex++].c_str());
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after redirect status code");
@@ -234,6 +249,22 @@ void Config::parseLocationBlock(ServerConfig& server)
 			hasRedirect = true;
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after redirect directive");
+		}
+		else if (directive == "error_page")
+		{
+			while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != ";")
+			{
+				if (_currentTokenIndex + 1 >= _tokens.size() || _tokens[_currentTokenIndex + 1] == ";")
+					throw std::runtime_error("Expected error_page status/path pair");
+				const std::string statusToken = _tokens[_currentTokenIndex++];
+				const std::string pathToken = _tokens[_currentTokenIndex++];
+				if (!isInteger(statusToken))
+					throw std::runtime_error("Expected numeric status code for error_page");
+				errorPages[std::atoi(statusToken.c_str())] = pathToken;
+			}
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Expected ';' after error_page directive");
+			_currentTokenIndex++; // Skip ';'
 		}
 		else if (directive == "client_max_body_size")
 		{
@@ -262,6 +293,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 	newLocation.setIndexFiles(indexFiles);
 	if (hasRedirect)
 		newLocation.setRedirect(redirectStatusCode, redirectTarget);
+	for (std::map<int, std::string>::const_iterator it = errorPages.begin(); it != errorPages.end(); ++it)
+		newLocation.addErrorPage(it->first, it->second);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)
 	{

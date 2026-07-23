@@ -1,6 +1,7 @@
 #ifndef LOCATIONCONFIG_HPP
 #define LOCATIONCONFIG_HPP
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ class LocationConfig {
 		void addAllowedMethod(const std::string& method);
 		void setIndexFiles(const std::vector<std::string>& indexFiles);
 		void setRedirect(int statusCode, const std::string& target);
+		void addErrorPage(int statusCode, const std::string& filePath);
 
 		// Setters for optional config directives
 		void setAutoindex(bool enabled);
@@ -24,6 +26,7 @@ class LocationConfig {
 		bool hasRedirect() const;
 		int getRedirectStatusCode() const;
 		const std::string& getRedirectTarget() const;
+		const std::map<int, std::string>& getErrorPages() const;
 		bool getAutoindex() const;
 		bool isUploadEnabled() const;
 		const std::string& getUploadStore() const;
@@ -37,6 +40,7 @@ class LocationConfig {
 		bool _hasRedirect;
 		int _redirectStatusCode;
 		std::string _redirectTarget;
+		std::map<int, std::string> _errorPages;
 
 		bool _autoindex;
 		bool _uploadEnabled;

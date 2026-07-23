@@ -2,7 +2,7 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
+_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _errorPages(), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
@@ -20,6 +20,11 @@ void LocationConfig::setRedirect(int statusCode, const std::string& target)
 	_hasRedirect = true;
 	_redirectStatusCode = statusCode;
 	_redirectTarget = target;
+}
+
+void LocationConfig::addErrorPage(int statusCode, const std::string& filePath)
+{
+	_errorPages[statusCode] = filePath;
 }
 
 void LocationConfig::setAutoindex(bool enabled)
@@ -73,6 +78,11 @@ int LocationConfig::getRedirectStatusCode() const
 const std::string& LocationConfig::getRedirectTarget() const
 {
 	return _redirectTarget;
+}
+
+const std::map<int, std::string>& LocationConfig::getErrorPages() const
+{
+	return _errorPages;
 }
 
 bool LocationConfig::getAutoindex() const

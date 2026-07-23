@@ -118,6 +118,16 @@ static bool resolveIndexFile(const std::string& directoryPath, const LocationCon
 	return false;
 }
 
+static HttpResponse buildErrorResponse(int statusCode, const LocationConfig* location)
+{
+	HttpResponse response;
+	if (location != NULL && !location->getErrorPages().empty())
+		ErrorPage::tryBuild(statusCode, location->getErrorPages(), response);
+	else
+		ErrorPage::tryBuildDefault(statusCode, response);
+	return response;
+}
+
 static bool isRedirectStatus(int statusCode)
 {
 	return statusCode >= 300 && statusCode < 400;
@@ -182,8 +192,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (request.getState() == RequestParser::STATE_PAYLOAD_TOO_LARGE)
 	{
 		Logger::warning("Router: Payload too large.");
-		response.setStatusCode(413);
-		response.setBody(ErrorPage::defaultBody(413));
+		response = ErrorPage::buildDefault(413);
 		return;
 	}
 
@@ -214,9 +223,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (location == NULL)
 	{
 		Logger::info("Router: No location found for " + request.getPath());
-		response.setStatusCode(404);
-		// somehow here need to build 404 error page. Not sure if used interface properly
-		response.setBody(ErrorPage::defaultBody(404));
+		response = ErrorPage::buildDefault(404);
 		return;
 	}
 
@@ -235,16 +242,14 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	if (!location->isMethodAllowed(request.getMethod()))
 	{
 		Logger::warning("Router: 405 Method Not Allowed (" + request.getMethod() + ") for " + request.getPath());
-		response.setStatusCode(405);
-		// somehow here need to build 405 error page. Not sure if used interface properly
-		response.setBody(ErrorPage::defaultBody(405));
+		response = buildErrorResponse(405, location);
 		return;
 	}
 
 	if (isBodyTooLarge(request, location))
 	{
 		Logger::warning("Router: request body too large for route " + location->getPath());
-		response = ErrorPage::buildDefault(413);
+		response = buildErrorResponse(413, location);
 		return;
 	}
 
@@ -256,7 +261,7 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 	} else if (request.getMethod() == "POST") {
 		handlePost(request, location, response);
 	} else if (request.getMethod() == "DELETE"){
-		handleDelete(physicalPath, response);
+		handleDelete(physicalPath, location, response);
 	} else {
 		// Handle 501 Not Implemented (for methods like PUT, PATCH if not implemented)
 		response.setStatusCode(501);
@@ -273,15 +278,14 @@ bool Router::isBodyTooLarge(const RequestParser& request, const LocationConfig* 
 	return request.getBody().size() > location->getClientMaxBodySize();
 }
 
-void Router::handleDelete(const std::string& physicalPath, HttpResponse& response) const
+void Router::handleDelete(const std::string& physicalPath, const LocationConfig* location, HttpResponse& response) const
 {
 	struct stat buffer;
 	// check if the file exists using stat
 	if (stat(physicalPath.c_str(), &buffer) != 0)
 	{
 		Logger::info("DELETE Error: File not found - " + physicalPath);
-		response.setStatusCode(404);
-		response.setBody(ErrorPage::defaultBody(404));
+		response = buildErrorResponse(404, location);
 		return;
 	}
 
@@ -295,8 +299,7 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	else
 	{
 		Logger::info("[INFO] DELETE Error: Forbidden/No Access - " + physicalPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = buildErrorResponse(403, location);
 	}
 }
 
@@ -312,8 +315,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0)
 	{
 		Logger::warning("GET eRROR: File not found - " + targetPath);
-		response.setStatusCode(404);
-		response.setBody(ErrorPage::defaultBody(404));
+		response = buildErrorResponse(404, location);
 		return;
 	}
 
@@ -340,7 +342,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 		else
 		{
 			Logger::warning("GET Error: Directory listing is disabled - " + physicalPath);
-			response = ErrorPage::buildDefault(403);
+			response = buildErrorResponse(403, location);
 			return;
 		}
 	}
@@ -348,16 +350,14 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
 	{
 		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = buildErrorResponse(403, location);
 		return;
 	}
 	// check permission for read
 	if (!(pathStat.st_mode & S_IRUSR))
 	{
 		Logger::warning("GET Error: Permission denied - " + targetPath);
-		response.setStatusCode(403);
-		response.setBody(ErrorPage::defaultBody(403));
+		response = buildErrorResponse(403, location);
 		return;
 	}
 
@@ -365,8 +365,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (!file.is_open())
 	{
 		Logger::error("GET Error: Could not open file - " + targetPath);
-		response.setStatusCode(500);
-		response.setBody(ErrorPage::defaultBody(500));
+		response = buildErrorResponse(500, location);
 		return;
 	}
 
@@ -385,7 +384,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 {
 	if (isBodyTooLarge(request, location))
 	{
-		response = ErrorPage::buildDefault(413);
+		response = buildErrorResponse(413, location);
 		return;
 	}
 
@@ -402,7 +401,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 		if (contentType == headers.end() || !extractBoundary(contentType->second, boundary)
 			|| !parseMultipartFile(body, boundary, filename, fileBody))
 		{
-			response = ErrorPage::buildDefault(400);
+			response = buildErrorResponse(400, location);
 			return;
 		}
 		UploadHandler::handleUpload(location->getUploadStore(), filename, fileBody, 0, response);
