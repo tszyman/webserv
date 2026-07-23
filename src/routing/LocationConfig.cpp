@@ -2,7 +2,7 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _allowedMethods(), _indexFiles(), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
+_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
@@ -13,6 +13,13 @@ void LocationConfig::addAllowedMethod(const std::string& method)
 void LocationConfig::setIndexFiles(const std::vector<std::string>& indexFiles)
 {
 	_indexFiles = indexFiles;
+}
+
+void LocationConfig::setRedirect(int statusCode, const std::string& target)
+{
+	_hasRedirect = true;
+	_redirectStatusCode = statusCode;
+	_redirectTarget = target;
 }
 
 void LocationConfig::setAutoindex(bool enabled)
@@ -51,6 +58,21 @@ const std::string& LocationConfig::getRoot() const
 const std::vector<std::string>& LocationConfig::getIndexFiles() const
 {
 	return _indexFiles;
+}
+
+bool LocationConfig::hasRedirect() const
+{
+	return _hasRedirect;
+}
+
+int LocationConfig::getRedirectStatusCode() const
+{
+	return _redirectStatusCode;
+}
+
+const std::string& LocationConfig::getRedirectTarget() const
+{
+	return _redirectTarget;
 }
 
 bool LocationConfig::getAutoindex() const

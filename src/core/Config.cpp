@@ -157,6 +157,9 @@ void Config::parseLocationBlock(ServerConfig& server)
 	std::string root = "";
 	std::vector<std::string> allowedMethods;
 	std::vector<std::string> indexFiles;
+	int redirectStatusCode = 301;
+	std::string redirectTarget = "";
+	bool hasRedirect = false;
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
@@ -220,6 +223,18 @@ void Config::parseLocationBlock(ServerConfig& server)
 				throw std::runtime_error("Expected ';' after index directive");
 			_currentTokenIndex++; // Skip ';'
 		}
+		else if (directive == "redirect")
+		{
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after redirect");
+			redirectStatusCode = std::atoi(_tokens[_currentTokenIndex++].c_str());
+			if (_currentTokenIndex >= _tokens.size())
+				throw std::runtime_error("Unexpected EOF after redirect status code");
+			redirectTarget = _tokens[_currentTokenIndex++];
+			hasRedirect = true;
+			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
+				throw std::runtime_error("Expected ';' after redirect directive");
+		}
 		else if (directive == "client_max_body_size")
 		{
 			if (_currentTokenIndex >= _tokens.size())
@@ -245,6 +260,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 		newLocation.addAllowedMethod(allowedMethods[i]);
 	}
 	newLocation.setIndexFiles(indexFiles);
+	if (hasRedirect)
+		newLocation.setRedirect(redirectStatusCode, redirectTarget);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)
 	{

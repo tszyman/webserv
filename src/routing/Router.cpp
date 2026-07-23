@@ -118,6 +118,11 @@ static bool resolveIndexFile(const std::string& directoryPath, const LocationCon
 	return false;
 }
 
+static bool isRedirectStatus(int statusCode)
+{
+	return statusCode >= 300 && statusCode < 400;
+}
+
 Router::Router() {}
 
 void Router::addLocation(const LocationConfig& location)
@@ -212,6 +217,17 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setStatusCode(404);
 		// somehow here need to build 404 error page. Not sure if used interface properly
 		response.setBody(ErrorPage::defaultBody(404));
+		return;
+	}
+
+	if (location->hasRedirect())
+	{
+		int statusCode = location->getRedirectStatusCode();
+		if (!isRedirectStatus(statusCode))
+			statusCode = 302;
+		response.setStatusCode(statusCode);
+		response.setHeader("Location", location->getRedirectTarget());
+		response.setBody("");
 		return;
 	}
 
