@@ -19,6 +19,7 @@ class EventLoop
         std::map<int, Connection*> _connections;
         std::vector<SocketEngine*> _server_engines;
         std::vector<ServerConfig>   _servers;
+        std::map<int, Connection*> _cgi_connections;
 
         EventLoop(const EventLoop& other);
         EventLoop& operator=(const EventLoop& other);
