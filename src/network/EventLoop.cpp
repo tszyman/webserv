@@ -75,6 +75,49 @@ const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) 
 	return NULL;
 }
 
+void EventLoop::processPendingRequest(int fd, Connection* conn)
+{
+	if (!conn->hasRequestData())
+		return;
+	conn->parseRequestData();
+	RequestParser::ParseState parseState = conn->getParser().getParseState();
+	RequestParser::ParserState state = conn->getParser().getState();
+
+	if (parseState == RequestParser::PARSE_SUCCESS)
+	{
+		Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
+		HttpResponse response;
+		const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
+		std::string host;
+		std::map<std::string, std::string>::const_iterator it = headers.find("host");
+		if (it != headers.end())
+			host = it->second;
+		const ServerConfig* currentConfig = matchServerConfig(host);
+		if (conn->getParser().getVersion() == "HTTP/1.1" && host.empty())
+			ErrorPage::tryBuildDefault(400, response);
+		else if (currentConfig != NULL)
+		{
+			Router router;
+			for (size_t i = 0; i < currentConfig->locations.size(); ++i)
+				router.addLocation(currentConfig->locations[i]);
+			router.route(conn->getParser(), response);
+		}
+		else
+			ErrorPage::tryBuildDefault(500, response);
+		conn->appendResponse(response.toString());
+		_poller.setEvents(fd, POLLIN | POLLOUT);
+	}
+	else if (parseState == RequestParser::PARSE_ERROR
+		|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))
+	{
+		Logger::warning("Request parsing error on FD: " + StringUtils::to_string(fd));
+		HttpResponse response;
+		ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
+		conn->appendResponse(response.toString());
+		_poller.setEvents(fd, POLLIN | POLLOUT);
+	}
+}
+
 void EventLoop::run()
 {
 	Logger::info("Starting the minimal event loop...");
@@ -193,56 +236,9 @@ void EventLoop::run()
 			{
 				Connection* conn = _connections[current_fd];
 				conn->updateLastActivity();
-				conn->getParser().feed(buffer, bytes_read);
-				RequestParser::ParseState parseState = conn->getParser().getParseState();
-				RequestParser::ParserState state = conn->getParser().getState();
-
-				if (parseState == RequestParser::PARSE_SUCCESS)
-				{
-					Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
-
-					HttpResponse response;
-					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
-					std::string host = "";
-					std::map<std::string, std::string>::const_iterator it = headers.find("host");
-					if (it != headers.end())
-						host = it->second;
-					
-					const ServerConfig* current_config = matchServerConfig(host);
-
-					if (conn->getParser().getVersion() == "HTTP/1.1" && host.empty())
-					{
-						ErrorPage::tryBuildDefault(400, response);
-					}
-					else if (current_config != NULL)
-					{
-						Router router;
-						for (size_t i = 0; i < current_config->locations.size(); ++i)
-						{
-							router.addLocation(current_config->locations[i]);
-						}
-
-						router.route(conn->getParser(), response);
-					}
-					else
-					{
-						ErrorPage::tryBuildDefault(500, response);
-					}
-
-					conn->appendResponse(response.toString());
-					_poller.setEvents(current_fd, POLLIN | POLLOUT);
-				}
-					else if (parseState == RequestParser::PARSE_ERROR
-						|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))
-				{
-					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));
-
-					HttpResponse response;
-						ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
-
-					conn->appendResponse(response.toString());
-					_poller.setEvents(current_fd, POLLIN | POLLOUT);
-				}
+				conn->appendRequestData(buffer, static_cast<size_t>(bytes_read));
+				if (conn->getResponseBuffer().empty())
+					processPendingRequest(current_fd, conn);
 			}
 		}
 	}
@@ -287,7 +283,10 @@ void EventLoop::run()
 					{
 						Logger::debug("Keep-Alive: Reseting state for FD " + StringUtils::to_string(current_fd));
 						conn->reset();
-						_poller.setEvents(current_fd, POLLIN);
+						if (conn->hasRequestData())
+							processPendingRequest(current_fd, conn);
+						else
+							_poller.setEvents(current_fd, POLLIN);
 					}
 					else
 					{

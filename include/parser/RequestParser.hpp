@@ -32,7 +32,7 @@ class RequestParser
 		
 		RequestParser(size_t maxBodySize);
 		
-		void feed(const char* data, size_t length);				//feed raw data from the socket into the parser
+		size_t feed(const char* data, size_t length);			// Returns the number of consumed bytes.
 		
 		ParseState getParseState() const;
 		ParserState getState() const;
@@ -71,7 +71,8 @@ class RequestParser
 		enum ChunkState{
 			CHUNK_SIZE,
 			CHUNK_DATA,
-			CHUNK_CRLF
+			CHUNK_CRLF,
+			CHUNK_TRAILERS
 		};
 		ChunkState _chunkState;
 		size_t _currentChunkSize;
@@ -80,8 +81,8 @@ class RequestParser
 		bool _oversizedBodyDrained;
 
 		void determineBodyType();
-		void processBody(const char* data, size_t length);
-		void drainOversizedBody(const char* data, size_t length);
+		size_t processBody(const char* data, size_t length);
+		size_t drainOversizedBody(const char* data, size_t length);
 
 		std::string trim(const std::string &str);
 		bool parseRequestLine(const std::string &line);

@@ -283,15 +283,12 @@ void RequestParser::determineBodyType()
 	_state = STATE_COMPLETE;
 }
 
-void RequestParser::feed(const char* data, size_t length)
+size_t RequestParser::feed(const char* data, size_t length)
 {
 	if (_state == STATE_ERROR || _state == STATE_COMPLETE)
-		return;
+		return 0;
 	if (_state == STATE_PAYLOAD_TOO_LARGE)
-	{
-		drainOversizedBody(data, length);
-		return;
-	}
+		return drainOversizedBody(data, length);
 
 	size_t i = 0;
 	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
@@ -299,7 +296,7 @@ void RequestParser::feed(const char* data, size_t length)
 		if (++_headerBytes > 32768)
 		{
 			_state = STATE_ERROR;
-			return;
+			return i;
 		}
 		_headerBuffer += data[i];
 		if(_headerBuffer.size() >= 2 && _headerBuffer.substr(_headerBuffer.size() - 2) == "\r\n")
@@ -309,7 +306,7 @@ void RequestParser::feed(const char* data, size_t length)
 			if (_state == STATE_REQUEST_LINE && line.size() > 8192)
 			{
 				_state = STATE_ERROR;
-				return;
+				return i + 1;
 			}
 
 			if(line.empty())
@@ -332,28 +329,26 @@ void RequestParser::feed(const char* data, size_t length)
 	}
 	// Process the reminder of the buffer as body data
 	if(_state == STATE_BODY && i < length)
-	{
-		processBody(data + i, length - i);
-	}
+		return i + processBody(data + i, length - i);
 	else if (_state == STATE_PAYLOAD_TOO_LARGE && i < length)
-	{
-		drainOversizedBody(data + i, length - i);
-	}
+		return i + drainOversizedBody(data + i, length - i);
+	return i;
 }
 
-void RequestParser::drainOversizedBody(const char* data, size_t length)
+size_t RequestParser::drainOversizedBody(const char* data, size_t length)
 {
 	(void)data;
 	if (_bodyType != BODY_CONTENT_LENGTH || _oversizedBodyDrained)
-		return;
+		return 0;
 	const size_t remaining = _contentLength - _bytesRead;
 	const size_t consumed = std::min(length, remaining);
 	_bytesRead += consumed;
 	if (_bytesRead == _contentLength)
 		_oversizedBodyDrained = true;
+	return consumed;
 }
 
-void RequestParser::processBody(const char* data, size_t length)
+size_t RequestParser::processBody(const char* data, size_t length)
 {
 	if(_bodyType == BODY_CONTENT_LENGTH)
 	{
@@ -361,14 +356,13 @@ void RequestParser::processBody(const char* data, size_t length)
 		if (_maxBodySize != 0 && _body.size() + bytesToRead > _maxBodySize)
 		{
 			_state = STATE_PAYLOAD_TOO_LARGE;
-			return;
+			return 0;
 		}
 		_body.insert(_body.end(), data, data + bytesToRead);
 		_bytesRead += bytesToRead;
 		if(_bytesRead >= _contentLength)
-		{
 			_state = STATE_COMPLETE;
-		}
+		return bytesToRead;
 	} 
 	else if(_bodyType == BODY_CHUNKED)
 	{
@@ -394,12 +388,12 @@ void RequestParser::processBody(const char* data, size_t length)
 						if (_maxBodySize != 0 && _body.size() + _currentChunkSize > _maxBodySize)
 						{
 							_state = STATE_PAYLOAD_TOO_LARGE;
-							return;
+							return i;
 						}
 						_chunkHexBuffer.clear();
 						_bytesRead = 0;
 						if(_currentChunkSize == 0)
-							_state = STATE_COMPLETE;
+							_chunkState = CHUNK_TRAILERS;
 						else
 							_chunkState = CHUNK_DATA;
 					}
@@ -410,7 +404,7 @@ void RequestParser::processBody(const char* data, size_t length)
 				if (_maxBodySize != 0 && _body.size() + 1 > _maxBodySize)
 				{
 					_state = STATE_PAYLOAD_TOO_LARGE;
-					return;
+					return i;
 				}
 				_body.push_back(data[i++]);
 				_bytesRead++;
@@ -437,6 +431,20 @@ void RequestParser::processBody(const char* data, size_t length)
 					}
 				}
 			}
+			else if(_chunkState == CHUNK_TRAILERS)
+			{
+				_chunkHexBuffer += data[i++];
+				if (_chunkHexBuffer.size() >= 2
+					&& _chunkHexBuffer.substr(_chunkHexBuffer.size() - 2) == "\r\n")
+				{
+					if (_chunkHexBuffer == "\r\n")
+						_state = STATE_COMPLETE;
+					else
+						_chunkHexBuffer.clear();
+				}
+			}
 		}
+		return i;
 	}
+	return length;
 }

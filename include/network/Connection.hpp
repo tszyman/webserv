@@ -11,6 +11,7 @@ class Connection // class representing client
     private:
         int _fd;
         std::string _response_buffer;
+		std::string _request_buffer;
         RequestParser _parser;
         time_t _last_activity;
         size_t _max_body_size;
@@ -29,6 +30,9 @@ class Connection // class representing client
         void appendResponse(const std::string& data);
         std::string& getResponseBuffer();
         void eraseSentData(size_t bytes);
+		void appendRequestData(const char* data, size_t bytes);
+		bool hasRequestData() const;
+		void parseRequestData();
         void reset();
         void updateLastActivity();
         bool isTimedOut(int timeout_second) const;

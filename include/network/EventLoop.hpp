@@ -24,6 +24,7 @@ class EventLoop
         EventLoop& operator=(const EventLoop& other);
         const ServerConfig* matchServerConfig(const std::string& hostHeader) const;
         size_t getMaxBodySizeForPort(int port) const;
+		void processPendingRequest(int fd, Connection* connection);
 
     public:
         static bool is_running;
