@@ -308,6 +308,7 @@ else if (component == "socket") {
                 for (size_t j = 0; j < servers[i].locations.size(); ++j) {
                     std::cout << "Loc Path: " << servers[i].locations[j].getPath() << std::endl;
                     std::cout << "Loc Root: " << servers[i].locations[j].getRoot() << std::endl;
+                    std::cout << "Loc Max Body Size: " << servers[i].locations[j].getClientMaxBodySize() << std::endl;
                     std::cout << "Autoindex: " << (servers[i].locations[j].getAutoindex() ? "on" : "off") << std::endl;
                     std::cout << "Upload: " << (servers[i].locations[j].isUploadEnabled() ? "on" : "off") << std::endl;
                     std::cout << "Upload Store: " << servers[i].locations[j].getUploadStore() << std::endl;
@@ -318,6 +319,7 @@ else if (component == "socket") {
         } else {
             std::cout << "FAILED_CONFIG_PARSER" << std::endl;
         }
+        return 0;
     }
     // ==========================================
     // COMPONENT: AUTOINDEX

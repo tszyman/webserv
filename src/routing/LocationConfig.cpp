@@ -2,7 +2,7 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _autoindex(false), _uploadEnabled(false), _uploadStore("") {}
+_path(path), _root(root), _allowedMethods(), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
@@ -19,6 +19,11 @@ void LocationConfig::setUpload(bool enabled, const std::string& storePath)
 {
 	_uploadEnabled = enabled;
 	_uploadStore = storePath;
+}
+
+void LocationConfig::setClientMaxBodySize(size_t maxBodySize)
+{
+	_clientMaxBodySize = maxBodySize;
 }
 
 bool LocationConfig::isMethodAllowed(const std::string& method) const
@@ -49,4 +54,9 @@ bool LocationConfig::isUploadEnabled() const
 const std::string& LocationConfig::getUploadStore() const
 {
 	return _uploadStore;
+}
+
+size_t LocationConfig::getClientMaxBodySize() const
+{
+	return _clientMaxBodySize;
 }
