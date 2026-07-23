@@ -50,27 +50,30 @@ void Server::run()
     Logger::info("Starting up network engines...");
     const std::vector<ServerConfig>& servers = _config.getServers();
 
-    std::set<int> unique_ports;
+    std::set<std::string> unique_endpoints;
     for (size_t i = 0; i < servers.size(); ++i)
     {
-        unique_ports.insert(servers[i].port);
+		unique_endpoints.insert(servers[i].host + ":" + StringUtils::to_string(servers[i].port));
     }
 
     std::vector<SocketEngine*> engines;
     
-    for (std::set<int>::iterator it = unique_ports.begin(); it != unique_ports.end(); ++it)
+    for (size_t i = 0; i < servers.size(); ++i)
     {
-        int current_port = *it;
-        SocketEngine* engine = new SocketEngine(current_port);
+		const std::string endpoint = servers[i].host + ":" + StringUtils::to_string(servers[i].port);
+		if (unique_endpoints.find(endpoint) == unique_endpoints.end())
+			continue;
+		unique_endpoints.erase(endpoint);
+        SocketEngine* engine = new SocketEngine(servers[i].host, servers[i].port);
     try
     {
         engine->init();
         engines.push_back(engine);
-        Logger::info("Successfully initialized SocketEngine on port: " + StringUtils::to_string(current_port));
+		Logger::info("Successfully initialized SocketEngine on " + endpoint);
     }
     catch (const std::exception& e)
     {
-        Logger::error(std::string("Failed to initialize SocketEngine on port ") + StringUtils::to_string(current_port) + ": " + e.what());
+		Logger::error(std::string("Failed to initialize SocketEngine on ") + endpoint + ": " + e.what());
         delete engine;
     }
     }

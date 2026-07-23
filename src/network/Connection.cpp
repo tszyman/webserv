@@ -3,7 +3,9 @@
 #include "utils/StringUtils.hpp"
 #include <iostream>
 
-Connection::Connection(int fd, size_t maxBodySize) : _fd(fd), _parser(maxBodySize), _max_body_size(maxBodySize)
+Connection::Connection(int fd, size_t maxBodySize, const std::string& listeningHost, int listeningPort)
+	: _fd(fd), _parser(maxBodySize), _listening_host(listeningHost),
+	_listening_port(listeningPort), _max_body_size(maxBodySize)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
     _last_activity = time(NULL);
@@ -21,6 +23,16 @@ Connection::~Connection()
 int Connection::getFd() const
 {
     return _fd;
+}
+
+const std::string& Connection::getListeningHost() const
+{
+	return _listening_host;
+}
+
+int Connection::getListeningPort() const
+{
+	return _listening_port;
 }
 
 void Connection::appendResponse(const std::string& data)

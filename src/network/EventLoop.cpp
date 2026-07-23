@@ -23,14 +23,14 @@ EventLoop::~EventLoop()
 	_connections.clear(); 
 }
 
-size_t EventLoop::getMaxBodySizeForPort(int port) const
+size_t EventLoop::getMaxBodySizeForEndpoint(const std::string& host, int port) const
 {
 	size_t maxBodySize = 0;
 	bool hasUnlimited = false;
 
 	for (size_t i = 0; i < _servers.size(); ++i)
 	{
-		if (_servers[i].port == port)
+		if (_servers[i].host == host && _servers[i].port == port)
 		{
 			if (_servers[i].clientMaxBodySize == 0)
 				hasUnlimited = true;
@@ -55,7 +55,8 @@ size_t EventLoop::getMaxBodySizeForPort(int port) const
 	return maxBodySize;
 }
 
-const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) const
+const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader,
+	const std::string& listeningHost, int listeningPort) const
 {
 	std::string host = hostHeader;
 
@@ -65,12 +66,14 @@ const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) 
 
 	for (size_t i = 0; i < _servers.size(); ++i)
 	{
-		if (_servers[i].serverName == host)
+		if (_servers[i].host == listeningHost && _servers[i].port == listeningPort
+			&& _servers[i].serverName == host)
 			return &_servers[i];
 	}
 
-	if (!_servers.empty())
-		return &_servers[0];
+	for (size_t i = 0; i < _servers.size(); ++i)
+		if (_servers[i].host == listeningHost && _servers[i].port == listeningPort)
+			return &_servers[i];
 	
 	return NULL;
 }
@@ -155,7 +158,7 @@ void EventLoop::run()
 		{
 			if (is_server_socket)
 			{
-				size_t max_body_size = getMaxBodySizeForPort(active_engine->getPort());
+				size_t max_body_size = getMaxBodySizeForEndpoint(active_engine->getHost(), active_engine->getPort());
 				Connection* new_conn = active_engine->acceptConnection(max_body_size);
 				if (new_conn != NULL)
 				{
@@ -226,7 +229,8 @@ void EventLoop::run()
 					if (it != headers.end())
 						host = it->second;
 					
-					const ServerConfig* current_config = matchServerConfig(host);
+					const ServerConfig* current_config = matchServerConfig(host,
+						conn->getListeningHost(), conn->getListeningPort());
 
 					if (conn->getParser().getVersion() == "HTTP/1.1" && host.empty())
 					{

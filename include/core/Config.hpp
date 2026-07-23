@@ -8,13 +8,14 @@
 
 // Represents a single server {} block from the config file
 struct ServerConfig {
+	std::string host;
 	int port;
 	std::string serverName;
 	std::vector<LocationConfig> locations;
 	size_t clientMaxBodySize;
 
 	// clientMaxBodySize: Default to 1MB (1048576 bytes) if not specified, or 0 for unlimited
-	ServerConfig() : port(8080), serverName("localhost"), clientMaxBodySize(1048576) {}
+	ServerConfig() : host("0.0.0.0"), port(8080), serverName("localhost"), clientMaxBodySize(1048576) {}
 };
 
 class Config {
@@ -34,6 +35,7 @@ class Config {
 		void tokenize(const std::string& fileContent);
 		void parseServerBlock();
 		void parseLocationBlock(ServerConfig& server);
+		static bool parseListenValue(const std::string& value, std::string& host, int& port);
 
 };
 
