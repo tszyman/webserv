@@ -8,6 +8,49 @@
 Config::Config() : _currentTokenIndex(0) {}
 Config::~Config() {}
 
+bool Config::parseListenValue(const std::string& value, std::string& host, int& port)
+{
+	std::string portText = value;
+	if (!value.empty() && value[0] == '[')
+	{
+		const std::string::size_type closingBracket = value.find(']');
+		if (closingBracket == std::string::npos || closingBracket == 1
+			|| closingBracket + 1 >= value.size() || value[closingBracket + 1] != ':')
+			return false;
+		host = value.substr(1, closingBracket - 1);
+		portText = value.substr(closingBracket + 2);
+	}
+	else
+	{
+		const std::string::size_type colon = value.rfind(':');
+		if (colon != std::string::npos)
+		{
+			if (colon == 0 || colon != value.find(':'))
+				return false;
+			host = value.substr(0, colon);
+			portText = value.substr(colon + 1);
+		}
+		else
+			host = "0.0.0.0";
+	}
+	if (portText.empty())
+		return false;
+
+	unsigned long parsedPort = 0;
+	for (size_t i = 0; i < portText.size(); ++i)
+	{
+		if (portText[i] < '0' || portText[i] > '9')
+			return false;
+		parsedPort = parsedPort * 10 + static_cast<unsigned long>(portText[i] - '0');
+		if (parsedPort > 65535)
+			return false;
+	}
+	if (parsedPort == 0)
+		return false;
+	port = static_cast<int>(parsedPort);
+	return true;
+}
+
 void Config::tokenize(const std::string& fileContent)
 {
 	std::string token = "";
@@ -96,6 +139,7 @@ bool Config::loadConfig(const std::string& filename)
 void Config::parseServerBlock()
 {
 	ServerConfig newServer;
+	bool hasListenDirective = false;
 
 	while (_currentTokenIndex < _tokens.size() && _tokens[_currentTokenIndex] != "}")
 	{
@@ -105,9 +149,14 @@ void Config::parseServerBlock()
 		{
 			if(_currentTokenIndex >= _tokens.size()) 
 				throw std::runtime_error("Unexpected EOF after listen");
-			newServer.port = std::atoi(_tokens[_currentTokenIndex++].c_str());
+			if (hasListenDirective)
+				throw std::runtime_error("Only one listen directive is allowed per server block");
+			const std::string listenValue = _tokens[_currentTokenIndex++];
+			if (!parseListenValue(listenValue, newServer.host, newServer.port))
+				throw std::runtime_error("Invalid listen value: " + listenValue);
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after listen directive");
+			hasListenDirective = true;
 		}
 		else if (directive == "server_name")
 		{
@@ -139,6 +188,8 @@ void Config::parseServerBlock()
 	{
 		throw std::runtime_error("Unexpected end of file, missing '}' for server block ");
 	}
+	if (!hasListenDirective)
+		throw std::runtime_error("Server block is missing a listen directive");
 
 	_currentTokenIndex++; // Skip '}'
 	_servers.push_back(newServer);

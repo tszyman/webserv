@@ -2,12 +2,13 @@
 #include "utils/Logger.hpp"
 #include "utils/StringUtils.hpp"
 
-SocketEngine::SocketEngine(int port) : _server_fd(-1), _port(port)
+SocketEngine::SocketEngine(int port) : _server_fd(-1), _host("0.0.0.0"), _port(port)
 {
-    std::memset(&_address, 0, sizeof(_address));
-    _address.sin_family = AF_INET;
-    _address.sin_addr.s_addr = INADDR_ANY;
-    _address.sin_port = htons(_port);
+}
+
+SocketEngine::SocketEngine(const std::string& host, int port)
+    : _server_fd(-1), _host(host), _port(port)
+{
 }
 
 SocketEngine::~SocketEngine()
@@ -20,44 +21,49 @@ SocketEngine::~SocketEngine()
 
 void SocketEngine::init()
 {
-    // 1. Create socket (IPv4, TCP)
-    _server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct addrinfo hints = {};
+    struct addrinfo* addresses = NULL;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    const char* bindHost = _host.c_str();
+    const std::string portText = StringUtils::to_string(_port);
+    const int addressResult = getaddrinfo(bindHost, portText.c_str(), &hints, &addresses);
+    if (addressResult != 0)
+        throw std::runtime_error(std::string("Error: getaddrinfo() failed: ") + gai_strerror(addressResult));
+
+    for (struct addrinfo* current = addresses; current != NULL; current = current->ai_next)
+    {
+        _server_fd = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+        if (_server_fd == -1)
+            continue;
+
+        int opt = 1;
+        if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1
+            || fcntl(_server_fd, F_SETFL, O_NONBLOCK) == -1
+            || fcntl(_server_fd, F_SETFD, FD_CLOEXEC) == -1)
+        {
+            close(_server_fd);
+            _server_fd = -1;
+            continue;
+        }
+        if (bind(_server_fd, current->ai_addr, current->ai_addrlen) == 0)
+            break;
+        close(_server_fd);
+        _server_fd = -1;
+    }
+    freeaddrinfo(addresses);
     if (_server_fd == -1)
-    {
-        throw std::runtime_error("Error: socket() failed");
-    }
-
-    // 2. SO_REUSEADDR - allows immediate server restart without "Address already in use!" error
-    int opt = 1;
-    if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
-    {
-        throw std::runtime_error("Error: sersockopt() failed");
-    }
-
-    // 3. Set socket to non-blocking mode and close-on-exec
-    if (fcntl(_server_fd, F_SETFL, O_NONBLOCK) == -1)
-    {
-        throw std::runtime_error("Error: fcntl(O_NONBLOCK) failed");
-    }
-
-    if (fcntl(_server_fd, F_SETFD, FD_CLOEXEC) == -1)
-    {
-        throw std::runtime_error("Error: fcntl(FD_CLOEXEC) failed");
-    }
-
-    // 4. Bind socket to address and port
-    if (bind(_server_fd, (struct sockaddr*)&_address, sizeof(_address)) == -1)
-    {
-        throw std::runtime_error("Error: bind() failed");
-    }
-
-    // 5. Start listening (backlog = SOMAXCONN for maximum queue size)
+        throw std::runtime_error("Error: bind() failed for " + _host + ":" + portText);
     if (listen(_server_fd, SOMAXCONN) == -1)
     {
+        close(_server_fd);
+        _server_fd = -1;
         throw std::runtime_error("Error: listen() failed");
     }
 
-    Logger::info(std::string("Server started and listening on port ") + StringUtils::to_string(_port) + "(FD: " + StringUtils::to_string(_server_fd) + ")");
+    Logger::info("Server started on " + _host + ":" + portText + " (FD: " + StringUtils::to_string(_server_fd) + ")");
 }
 
 Connection* SocketEngine::acceptConnection(size_t maxBodySize)
@@ -81,7 +87,7 @@ Connection* SocketEngine::acceptConnection(size_t maxBodySize)
     
     try
     {
-        return new Connection(client_fd, maxBodySize);
+		return new Connection(client_fd, maxBodySize, _host, _port);
     }
     catch (const std::exception& e)
     {
@@ -99,4 +105,9 @@ int SocketEngine::getFd() const
 int SocketEngine::getPort() const
 {
     return _port;
+}
+
+const std::string& SocketEngine::getHost() const
+{
+	return _host;
 }

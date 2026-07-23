@@ -23,8 +23,9 @@ class EventLoop
 
         EventLoop(const EventLoop& other);
         EventLoop& operator=(const EventLoop& other);
-        const ServerConfig* matchServerConfig(const std::string& hostHeader) const;
-        size_t getMaxBodySizeForPort(int port) const;
+		const ServerConfig* matchServerConfig(const std::string& hostHeader,
+			const std::string& listeningHost, int listeningPort) const;
+        size_t getMaxBodySizeForEndpoint(const std::string& host, int port) const;
 
     public:
         static bool is_running;
