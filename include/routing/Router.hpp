@@ -19,6 +19,7 @@ class Router {
 		std::vector<LocationConfig> _locations;
 		const LocationConfig* matchLocation(const std::string& uri) const;
 		std::string translatePath(const std::string& uri, const LocationConfig* location) const;
+		bool isBodyTooLarge(const RequestParser& request, const LocationConfig* location) const;
 
 		// method handlers
 		void handleGet(const std::string& requestUri, const std::string& physicalPath, const LocationConfig* location, HttpResponse& response) const;

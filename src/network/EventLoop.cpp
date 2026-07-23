@@ -25,13 +25,34 @@ EventLoop::~EventLoop()
 
 size_t EventLoop::getMaxBodySizeForPort(int port) const
 {
+	size_t maxBodySize = 0;
+	bool hasUnlimited = false;
+
 	for (size_t i = 0; i < _servers.size(); ++i)
 	{
 		if (_servers[i].port == port)
-			return _servers[i].clientMaxBodySize;
+		{
+			if (_servers[i].clientMaxBodySize == 0)
+				hasUnlimited = true;
+			else if (_servers[i].clientMaxBodySize > maxBodySize)
+				maxBodySize = _servers[i].clientMaxBodySize;
+
+			for (size_t j = 0; j < _servers[i].locations.size(); ++j)
+			{
+				const size_t locationLimit = _servers[i].locations[j].getClientMaxBodySize();
+				if (locationLimit == 0)
+					hasUnlimited = true;
+				else if (locationLimit > maxBodySize)
+					maxBodySize = locationLimit;
+			}
+		}
 	}
 
-	return 1048576;
+	if (hasUnlimited)
+		return 0;
+	if (maxBodySize == 0)
+		return 1048576;
+	return maxBodySize;
 }
 
 const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader) const
@@ -191,9 +212,10 @@ void EventLoop::run()
 				Connection* conn = _connections[current_fd];
 				conn->updateLastActivity();
 				conn->getParser().feed(buffer, bytes_read);
+				RequestParser::ParseState parseState = conn->getParser().getParseState();
 				RequestParser::ParserState state = conn->getParser().getState();
 
-				if (state == RequestParser::STATE_COMPLETE)
+				if (parseState == RequestParser::PARSE_SUCCESS)
 				{
 					Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
 
@@ -237,7 +259,7 @@ void EventLoop::run()
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
 					}
 				}
-					else if (state == RequestParser::STATE_ERROR
+					else if (parseState == RequestParser::PARSE_ERROR
 						|| (state == RequestParser::STATE_PAYLOAD_TOO_LARGE && conn->getParser().isOversizedBodyDrained()))
 				{
 					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));

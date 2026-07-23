@@ -11,90 +11,87 @@
 #include <cstdio>
 #include <sys/stat.h>
 
-namespace
+static bool isLocationPrefix(const std::string& uri, const std::string& locationPath)
 {
-	bool isLocationPrefix(const std::string& uri, const std::string& locationPath)
-	{
-		if (uri.compare(0, locationPath.size(), locationPath) != 0)
-			return false;
-		if (locationPath == "/" || uri.size() == locationPath.size())
-			return true;
-		return locationPath[locationPath.size() - 1] == '/' || uri[locationPath.size()] == '/';
-	}
-
-	bool containsTraversal(const std::string& path)
-	{
-		std::string::size_type start = 0;
-		while (start <= path.size())
-		{
-			const std::string::size_type end = path.find('/', start);
-			const std::string part = path.substr(start, end - start);
-			if (part == "..")
-				return true;
-			if (end == std::string::npos)
-				break;
-			start = end + 1;
-		}
+	if (uri.compare(0, locationPath.size(), locationPath) != 0)
 		return false;
-	}
+	if (locationPath == "/" || uri.size() == locationPath.size())
+		return true;
+	return locationPath[locationPath.size() - 1] == '/' || uri[locationPath.size()] == '/';
+}
 
-	bool extractBoundary(const std::string& contentType, std::string& boundary)
+static bool containsTraversal(const std::string& path)
+{
+	std::string::size_type start = 0;
+	while (start <= path.size())
 	{
-		const std::string marker = "boundary=";
-		const std::string::size_type markerPos = contentType.find(marker);
-		if (contentType.compare(0, 19, "multipart/form-data") != 0 || markerPos == std::string::npos)
-			return false;
-		boundary = contentType.substr(markerPos + marker.size());
-		const std::string::size_type semicolon = boundary.find(';');
-		if (semicolon != std::string::npos)
-			boundary.erase(semicolon);
-		if (boundary.size() >= 2 && boundary[0] == '"' && boundary[boundary.size() - 1] == '"')
-			boundary = boundary.substr(1, boundary.size() - 2);
-		return !boundary.empty() && boundary.find('\r') == std::string::npos && boundary.find('\n') == std::string::npos;
-	}
-
-	bool extractDispositionValue(const std::string& disposition, const std::string& key, std::string& value)
-	{
-		const std::string marker = key + "=";
-		const std::string::size_type pos = disposition.find(marker);
-		if (pos == std::string::npos)
-			return false;
-		const std::string::size_type begin = pos + marker.size();
-		if (begin >= disposition.size() || disposition[begin] != '"')
-			return false;
-		const std::string::size_type end = disposition.find('"', begin + 1);
+		const std::string::size_type end = path.find('/', start);
+		const std::string part = path.substr(start, end - start);
+		if (part == "..")
+			return true;
 		if (end == std::string::npos)
-			return false;
-		value = disposition.substr(begin + 1, end - begin - 1);
-		return true;
+			break;
+		start = end + 1;
 	}
+	return false;
+}
 
-	bool parseMultipartFile(const std::string& body, const std::string& boundary, std::string& filename, std::string& fileBody)
-	{
-		const std::string opening = "--" + boundary + "\r\n";
-		const std::string separator = "\r\n\r\n";
-		const std::string closingPrefix = "\r\n--" + boundary;
-		if (body.compare(0, opening.size(), opening) != 0)
-			return false;
-		const std::string::size_type headersEnd = body.find(separator, opening.size());
-		if (headersEnd == std::string::npos)
-			return false;
-		const std::string headers = body.substr(opening.size(), headersEnd - opening.size());
-		const std::string dispositionName = "Content-Disposition:";
-		const std::string::size_type dispositionPos = headers.find(dispositionName);
-		if (dispositionPos == std::string::npos)
-			return false;
-		const std::string::size_type dispositionEnd = headers.find("\r\n", dispositionPos);
-		const std::string disposition = headers.substr(dispositionPos + dispositionName.size(), dispositionEnd - dispositionPos - dispositionName.size());
-		if (!extractDispositionValue(disposition, "filename", filename))
-			return false;
-		const std::string::size_type dataStart = headersEnd + separator.size();
-		const std::string::size_type dataEnd = body.find(closingPrefix, dataStart);
-		if (dataEnd == std::string::npos || body.compare(dataEnd + closingPrefix.size(), 2, "--") != 0)
-			return false;
-		fileBody.assign(body, dataStart, dataEnd - dataStart);
-		return true;
-	}
+static bool extractBoundary(const std::string& contentType, std::string& boundary)
+{
+	const std::string marker = "boundary=";
+	const std::string::size_type markerPos = contentType.find(marker);
+	if (contentType.compare(0, 19, "multipart/form-data") != 0 || markerPos == std::string::npos)
+		return false;
+	boundary = contentType.substr(markerPos + marker.size());
+	const std::string::size_type semicolon = boundary.find(';');
+	if (semicolon != std::string::npos)
+		boundary.erase(semicolon);
+	if (boundary.size() >= 2 && boundary[0] == '"' && boundary[boundary.size() - 1] == '"')
+		boundary = boundary.substr(1, boundary.size() - 2);
+	return !boundary.empty() && boundary.find('\r') == std::string::npos && boundary.find('\n') == std::string::npos;
+}
+
+static bool extractDispositionValue(const std::string& disposition, const std::string& key, std::string& value)
+{
+	const std::string marker = key + "=";
+	const std::string::size_type pos = disposition.find(marker);
+	if (pos == std::string::npos)
+		return false;
+	const std::string::size_type begin = pos + marker.size();
+	if (begin >= disposition.size() || disposition[begin] != '"')
+		return false;
+	const std::string::size_type end = disposition.find('"', begin + 1);
+	if (end == std::string::npos)
+		return false;
+	value = disposition.substr(begin + 1, end - begin - 1);
+	return true;
+}
+
+static bool parseMultipartFile(const std::string& body, const std::string& boundary, std::string& filename, std::string& fileBody)
+{
+	const std::string opening = "--" + boundary + "\r\n";
+	const std::string separator = "\r\n\r\n";
+	const std::string closingPrefix = "\r\n--" + boundary;
+	if (body.compare(0, opening.size(), opening) != 0)
+		return false;
+	const std::string::size_type headersEnd = body.find(separator, opening.size());
+	if (headersEnd == std::string::npos)
+		return false;
+	const std::string headers = body.substr(opening.size(), headersEnd - opening.size());
+	const std::string dispositionName = "Content-Disposition:";
+	const std::string::size_type dispositionPos = headers.find(dispositionName);
+	if (dispositionPos == std::string::npos)
+		return false;
+	const std::string::size_type dispositionEnd = headers.find("\r\n", dispositionPos);
+	const std::string disposition = headers.substr(dispositionPos + dispositionName.size(), dispositionEnd - dispositionPos - dispositionName.size());
+	if (!extractDispositionValue(disposition, "filename", filename))
+		return false;
+	const std::string::size_type dataStart = headersEnd + separator.size();
+	const std::string::size_type dataEnd = body.find(closingPrefix, dataStart);
+	if (dataEnd == std::string::npos || body.compare(dataEnd + closingPrefix.size(), 2, "--") != 0)
+		return false;
+	fileBody.assign(body, dataStart, dataEnd - dataStart);
+	return true;
 }
 
 Router::Router() {}
@@ -160,6 +157,21 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setBody(ErrorPage::defaultBody(413));
 		return;
 	}
+
+	if (request.getMethodState() == RequestParser::METHOD_UNKNOWN)
+	{
+		Logger::warning("Router: 400 Bad Request (unknown method) for " + request.getPath());
+		response = ErrorPage::buildDefault(400);
+		return;
+	}
+
+	if (request.getMethodState() == RequestParser::METHOD_UNIMPLEMENTED)
+	{
+		Logger::warning("Router: 501 Not Implemented (" + request.getMethod() + ") for " + request.getPath());
+		response = ErrorPage::buildDefault(501);
+		return;
+	}
+
 	if (containsTraversal(request.getPath()))
 	{
 		Logger::warning("Router: rejected path traversal attempt: " + request.getPath());
@@ -189,6 +201,13 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		return;
 	}
 
+	if (isBodyTooLarge(request, location))
+	{
+		Logger::warning("Router: request body too large for route " + location->getPath());
+		response = ErrorPage::buildDefault(413);
+		return;
+	}
+
 	// 3. Translate the path and route to the correct handler
 	std::string physicalPath = translatePath(request.getPath(), location);
 
@@ -203,6 +222,15 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 		response.setStatusCode(501);
 		response.setBody(ErrorPage::defaultBody(501));
 	}
+}
+
+bool Router::isBodyTooLarge(const RequestParser& request, const LocationConfig* location) const
+{
+	if (!location)
+		return false;
+	if (location->getClientMaxBodySize() == 0)
+		return false;
+	return request.getBody().size() > location->getClientMaxBodySize();
 }
 
 void Router::handleDelete(const std::string& physicalPath, HttpResponse& response) const
@@ -221,8 +249,8 @@ void Router::handleDelete(const std::string& physicalPath, HttpResponse& respons
 	if (std::remove(physicalPath.c_str()) == 0)
 	{
 		Logger::info("DELETE Success: " +  physicalPath);
-		response.setStatusCode(202);
-		response.setBody(ErrorPage::defaultBody(204));
+		response.setStatusCode(204);
+		response.setBody("");
 	}
 	else
 	{
@@ -320,6 +348,12 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 
 void Router::handlePost(const RequestParser& request, const LocationConfig* location, HttpResponse& response) const
 {
+	if (isBodyTooLarge(request, location))
+	{
+		response = ErrorPage::buildDefault(413);
+		return;
+	}
+
 	if (location != NULL && location->isUploadEnabled())
 	{
 		const std::map<std::string, std::string>& headers = request.getHeaders();

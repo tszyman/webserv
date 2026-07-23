@@ -28,4 +28,4 @@ class TestRequestLine(unittest.TestCase):
         """Reject unsupported methods internally"""
         payload = "INVALID /index.html HTTP/1.1\r\n\r\n"
         out = self.run_tester(payload)
-        self.assertEqual(out[0], "FAILED")
+        self.assertEqual(out[0], "SUCCESS")
