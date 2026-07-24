@@ -309,6 +309,8 @@ else if (component == "socket") {
                     std::cout << "Loc Path: " << servers[i].locations[j].getPath() << std::endl;
                     std::cout << "Loc Root: " << servers[i].locations[j].getRoot() << std::endl;
                     std::cout << "Loc Max Body Size: " << servers[i].locations[j].getClientMaxBodySize() << std::endl;
+                    std::cout << "CGI Extension: " << servers[i].locations[j].getCgiExtension() << std::endl;
+                    std::cout << "CGI Executable: " << servers[i].locations[j].getCgiExecutable() << std::endl;
                     std::cout << "Autoindex: " << (servers[i].locations[j].getAutoindex() ? "on" : "off") << std::endl;
                     std::cout << "Upload: " << (servers[i].locations[j].isUploadEnabled() ? "on" : "off") << std::endl;
                     std::cout << "Upload Store: " << servers[i].locations[j].getUploadStore() << std::endl;

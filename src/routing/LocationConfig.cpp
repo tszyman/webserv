@@ -2,12 +2,35 @@
 #include <algorithm>
 
 LocationConfig::LocationConfig(const std::string& path, const std::string& root) : 
-_path(path), _root(root), _allowedMethods(), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
+_path(path), _root(root), _allowedMethods(), _indexFiles(), _hasRedirect(false), _redirectStatusCode(301), _redirectTarget(""), _errorPages(), _cgiExtension(""), _cgiExecutable(""), _autoindex(false), _uploadEnabled(false), _uploadStore(""), _clientMaxBodySize(0) {}
 
 void LocationConfig::addAllowedMethod(const std::string& method)
 {
 	if(std::find(_allowedMethods.begin(), _allowedMethods.end(), method) == _allowedMethods.end())
 		_allowedMethods.push_back(method);
+}
+
+void LocationConfig::setIndexFiles(const std::vector<std::string>& indexFiles)
+{
+	_indexFiles = indexFiles;
+}
+
+void LocationConfig::setRedirect(int statusCode, const std::string& target)
+{
+	_hasRedirect = true;
+	_redirectStatusCode = statusCode;
+	_redirectTarget = target;
+}
+
+void LocationConfig::addErrorPage(int statusCode, const std::string& filePath)
+{
+	_errorPages[statusCode] = filePath;
+}
+
+void LocationConfig::setCgi(const std::string& extension, const std::string& executable)
+{
+	_cgiExtension = extension;
+	_cgiExecutable = executable;
 }
 
 void LocationConfig::setAutoindex(bool enabled)
@@ -53,6 +76,41 @@ const std::string& LocationConfig::getPath() const
 const std::string& LocationConfig::getRoot() const
 {
 	return _root;
+}
+
+const std::vector<std::string>& LocationConfig::getIndexFiles() const
+{
+	return _indexFiles;
+}
+
+bool LocationConfig::hasRedirect() const
+{
+	return _hasRedirect;
+}
+
+int LocationConfig::getRedirectStatusCode() const
+{
+	return _redirectStatusCode;
+}
+
+const std::string& LocationConfig::getRedirectTarget() const
+{
+	return _redirectTarget;
+}
+
+const std::map<int, std::string>& LocationConfig::getErrorPages() const
+{
+	return _errorPages;
+}
+
+const std::string& LocationConfig::getCgiExtension() const
+{
+	return _cgiExtension;
+}
+
+const std::string& LocationConfig::getCgiExecutable() const
+{
+	return _cgiExecutable;
 }
 
 bool LocationConfig::getAutoindex() const
