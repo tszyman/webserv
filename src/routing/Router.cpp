@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <poll.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -468,10 +470,13 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 
 	if (location != NULL)
 	{
-		cgiExecutable = location->getPath();
+		cgiExecutable = location->getCgiExecutable();
 		if (!location->getRoot().empty())
 		{
-			scriptPath = location->getRoot() + request.getPath();
+			if (request.getPath() == location->getPath())
+				scriptPath = location->getRoot() + request.getPath();
+			else
+				scriptPath = translatePath(request.getPath(), location);
 		}
 	}
 

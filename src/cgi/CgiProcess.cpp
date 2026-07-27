@@ -7,6 +7,7 @@
 #include <unistd.h> // for pipe, fork, execve, close, dup2
 #include <fcntl.h> // for fcntl, 0_NONBLOCK, FD_CLOEXEC
 #include <sys/types.h> // for pid_t
+#include <limits.h>
 
 CgiProcess::CgiProcess() : _serverToCgiFd(-1), _cgiToServerFd(-1), _pid(-1) {}
 CgiProcess::~CgiProcess() {}
@@ -14,6 +15,19 @@ CgiProcess::~CgiProcess() {}
 bool CgiProcess::execute(const std::string& scriptPath, const std::string& cgiExecutable, char** envp) {
 	int pipe_in[2];
 	int pipe_out[2];
+	char cwdBuffer[PATH_MAX + 1];
+	std::string currentDir;
+	std::string absoluteScriptPath = scriptPath;
+	std::string absoluteExecutablePath = cgiExecutable;
+	bool hasCwd = (getcwd(cwdBuffer, sizeof(cwdBuffer)) != NULL);
+	if (hasCwd)
+	{
+		currentDir = cwdBuffer;
+		if (!absoluteScriptPath.empty() && absoluteScriptPath[0] != '/')
+			absoluteScriptPath = currentDir + "/" + absoluteScriptPath;
+		if (!absoluteExecutablePath.empty() && absoluteExecutablePath[0] != '/')
+			absoluteExecutablePath = currentDir + "/" + absoluteExecutablePath;
+	}
 
 	if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0)
 	{
@@ -41,14 +55,14 @@ bool CgiProcess::execute(const std::string& scriptPath, const std::string& cgiEx
 		char* args[3];
 		// execve does not modify argv strings.  The std::string objects remain
 		// alive until execve replaces this child process.
-		args[0] = const_cast<char*>(cgiExecutable.c_str());
-		args[1] = const_cast<char*>(scriptPath.c_str());
+		args[0] = const_cast<char*>(absoluteExecutablePath.c_str());
+		args[1] = const_cast<char*>(absoluteScriptPath.c_str());
 		args[2] = NULL;
 
-		size_t lastSlash = scriptPath.find_last_of('/');
+		size_t lastSlash = absoluteScriptPath.find_last_of('/');
 		if (lastSlash != std::string::npos)
 		{
-			std::string dir = scriptPath.substr(0, lastSlash);
+			std::string dir = absoluteScriptPath.substr(0, lastSlash);
 			chdir(dir.c_str());
 		}
 
