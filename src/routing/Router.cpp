@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <poll.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -226,19 +228,6 @@ static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
 	return true;
 }
 
-static bool writeAll(int fd, const char* data, size_t size)
-{
-	size_t totalWritten = 0;
-	while (totalWritten < size)
-	{
-		ssize_t written = write(fd, data + totalWritten, size - totalWritten);
-		if (written < 0)
-			return false;
-		totalWritten += static_cast<size_t>(written);
-	}
-	return true;
-}
-
 Router::Router() {}
 
 void Router::addLocation(const LocationConfig& location)
@@ -406,32 +395,107 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 	}
 
 	const std::vector<char>& body = request.getBody();
-	if (!body.empty())
+	std::string output;
+	const int readFd = cgi.getReadFd();
+	const int writeFd = cgi.getWriteFd();
+	size_t bodyOffset = 0;
+	bool writeClosed = false;
+	bool readClosed = false;
+
+	if (body.empty())
 	{
-		if (!writeAll(cgi.getWriteFd(), &body[0], body.size()))
+		close(writeFd);
+		writeClosed = true;
+	}
+
+	while (!readClosed)
+	{
+		struct pollfd pollFds[2];
+		int pollCount = 0;
+		int writeIndex = -1;
+		int readIndex = -1;
+
+		if (!writeClosed)
 		{
-			close(cgi.getWriteFd());
-			close(cgi.getReadFd());
+			pollFds[pollCount].fd = writeFd;
+			pollFds[pollCount].events = POLLOUT;
+			pollFds[pollCount].revents = 0;
+			writeIndex = pollCount;
+			++pollCount;
+		}
+
+		pollFds[pollCount].fd = readFd;
+		pollFds[pollCount].events = POLLIN;
+		pollFds[pollCount].revents = 0;
+		readIndex = pollCount;
+		++pollCount;
+
+		int pollResult;
+		do
+		{
+			pollResult = poll(pollFds, pollCount, -1);
+		} while (pollResult < 0 && errno == EINTR);
+
+		if (pollResult < 0)
+		{
+			if (!writeClosed)
+				close(writeFd);
+			close(readFd);
 			waitpid(cgi.getPid(), NULL, 0);
 			response = buildErrorResponse(500, location);
 			return true;
 		}
+
+		if (writeIndex != -1 && (pollFds[writeIndex].revents & POLLOUT))
+		{
+			if (bodyOffset < body.size())
+			{
+				const size_t remaining = body.size() - bodyOffset;
+				const size_t chunkSize = remaining > 4096 ? 4096 : remaining;
+				ssize_t bytesWritten = write(writeFd, &body[bodyOffset], chunkSize);
+				if (bytesWritten > 0)
+				{
+					bodyOffset += static_cast<size_t>(bytesWritten);
+					if (bodyOffset == body.size())
+					{
+						close(writeFd);
+						writeClosed = true;
+					}
+				}
+				else if (bytesWritten < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+				{
+					if (!writeClosed)
+						close(writeFd);
+					close(readFd);
+					waitpid(cgi.getPid(), NULL, 0);
+					response = buildErrorResponse(500, location);
+					return true;
+				}
+			}
+		}
+
+		if (readIndex != -1 && (pollFds[readIndex].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
+		{
+			char buffer[4096];
+			ssize_t bytesRead = 0;
+			while ((bytesRead = read(readFd, buffer, sizeof(buffer))) > 0)
+				output.append(buffer, static_cast<size_t>(bytesRead));
+			if (bytesRead == 0)
+				readClosed = true;
+			else if (bytesRead < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+			{
+				if (!writeClosed)
+					close(writeFd);
+				close(readFd);
+				waitpid(cgi.getPid(), NULL, 0);
+				response = buildErrorResponse(500, location);
+				return true;
+			}
+		}
 	}
-	close(cgi.getWriteFd());
 
-	int status = 0;
-	waitpid(cgi.getPid(), &status, 0);
-
-	int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
-	if (flags != -1)
-		fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
-
-	std::string output;
-	char buffer[1024];
-	ssize_t bytesRead = 0;
-	while ((bytesRead = read(cgi.getReadFd(), buffer, sizeof(buffer))) > 0)
-		output.append(buffer, static_cast<size_t>(bytesRead));
-	close(cgi.getReadFd());
+	close(readFd);
+	waitpid(cgi.getPid(), NULL, 0);
 
 	if (output.empty())
 	{
@@ -587,10 +651,13 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 
 	if (location != NULL)
 	{
-		cgiExecutable = location->getPath();
+		cgiExecutable = location->getCgiExecutable();
 		if (!location->getRoot().empty())
 		{
-			scriptPath = location->getRoot() + request.getPath();
+			if (request.getPath() == location->getPath())
+				scriptPath = location->getRoot() + request.getPath();
+			else
+				scriptPath = translatePath(request.getPath(), location);
 		}
 	}
 
