@@ -226,6 +226,8 @@ void Config::parseLocationBlock(ServerConfig& server)
 	std::map<int, std::string> errorPages;
 	std::string cgiExtension = "";
 	std::string cgiExecutable = "";
+	bool cgiExtensionSet = false;
+	bool cgiExecutableSet = false;
 	bool autoindex = false;
 	bool uploadEnabled = false;
 	std::string uploadStore = "";
@@ -325,6 +327,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after cgi_extension");
 			cgiExtension = _tokens[_currentTokenIndex++];
+			cgiExtensionSet = true;
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after cgi_extension directive");
 		}
@@ -333,6 +336,7 @@ void Config::parseLocationBlock(ServerConfig& server)
 			if (_currentTokenIndex >= _tokens.size())
 				throw std::runtime_error("Unexpected EOF after cgi_executable");
 			cgiExecutable = _tokens[_currentTokenIndex++];
+			cgiExecutableSet = true;
 			if (_currentTokenIndex >= _tokens.size() || _tokens[_currentTokenIndex++] != ";")
 				throw std::runtime_error("Expected ';' after cgi_executable directive");
 		}
@@ -366,7 +370,9 @@ void Config::parseLocationBlock(ServerConfig& server)
 		newLocation.setRedirect(redirectStatusCode, redirectTarget);
 	for (std::map<int, std::string>::const_iterator it = errorPages.begin(); it != errorPages.end(); ++it)
 		newLocation.addErrorPage(it->first, it->second);
-	if (!cgiExtension.empty() || !cgiExecutable.empty())
+	if (cgiExtensionSet != cgiExecutableSet)
+		throw std::runtime_error("cgi_extension and cgi_executable must be configured together");
+	if (cgiExtensionSet && cgiExecutableSet)
 		newLocation.setCgi(cgiExtension, cgiExecutable);
 	newLocation.setAutoindex(autoindex);
 	if(uploadEnabled)

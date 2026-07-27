@@ -417,9 +417,6 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 	}
 	close(cgi.getWriteFd());
 
-	int status = 0;
-	waitpid(cgi.getPid(), &status, 0);
-
 	int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
 	if (flags != -1)
 		fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
@@ -430,6 +427,9 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 	while ((bytesRead = read(cgi.getReadFd(), buffer, sizeof(buffer))) > 0)
 		output.append(buffer, static_cast<size_t>(bytesRead));
 	close(cgi.getReadFd());
+
+		int status = 0;
+		waitpid(cgi.getPid(), &status, 0);
 
 	if (output.empty())
 	{

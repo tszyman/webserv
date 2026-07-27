@@ -30,10 +30,12 @@ class TestEvaluationLiveServer(unittest.TestCase):
         cls.vhost_root = os.path.join(cls.work_dir, "vhost")
         cls.delete_root = os.path.join(cls.work_dir, "delete-target")
         cls.upload_root = os.path.join(cls.work_dir, "uploads")
+        cls.cgi_root = os.path.join(cls.work_dir, "cgi")
         os.makedirs(os.path.join(cls.root, "listing"))
         os.makedirs(cls.vhost_root)
         os.makedirs(cls.delete_root)
         os.makedirs(cls.upload_root)
+        os.makedirs(cls.cgi_root)
         with open(os.path.join(cls.root, "index.html"), "w") as page:
             page.write("local test index\n")
         with open(os.path.join(cls.root, "listing", "visible.txt"), "w") as page:
@@ -46,6 +48,11 @@ class TestEvaluationLiveServer(unittest.TestCase):
             page.write("private file outside the document root\n")
         with open(os.path.join(cls.vhost_root, "index.html"), "w") as page:
             page.write("virtual host index\n")
+        with open(os.path.join(cls.cgi_root, "large.py"), "w") as script:
+            script.write("import sys\n")
+            script.write("print('Content-Type: text/plain\\r\\n\\r\\n', end='')\n")
+            script.write("print('A' * 100000)\n")
+        os.chmod(os.path.join(cls.cgi_root, "large.py"), 0o755)
 
         cls.config_path = os.path.join(cls.work_dir, "live.conf")
         with open(cls.config_path, "w") as config:
@@ -81,6 +88,12 @@ class TestEvaluationLiveServer(unittest.TestCase):
         upload_enable on;
         upload_store %s;
     }
+    location /cgi {
+        root %s;
+        allowed_methods GET POST;
+        cgi_extension .py;
+        cgi_executable %s;
+    }
 }
 server {
     listen %d;
@@ -91,7 +104,8 @@ server {
     }
 }
 """ % (cls.PORT, cls.root, cls.root, cls.root, cls.root, cls.delete_root,
-    cls.upload_root, cls.upload_root, cls.PORT, cls.vhost_root))
+    cls.upload_root, cls.upload_root, cls.cgi_root, sys.executable, cls.PORT,
+    cls.vhost_root))
 
         cls.server = run_tests.start_main_server(cls.config_path)
         cls.wait_until_listening()
@@ -173,6 +187,11 @@ server {
             "POST /limited HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\nAAAAAAAAA")
         self.assertTrue(response.startswith("HTTP/1.1 413"), response)
 
+    def test_cgi_large_output(self):
+        response = self.send_raw_request("GET /cgi/large.py HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("A" * 1000, response)
+
     def test_chunked_post(self):
         response = self.send_raw_request(
             "POST /post HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
@@ -246,3 +265,13 @@ server {
         response = self.send_raw_request("GET /../outside.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
         self.assertFalse(response.startswith("HTTP/1.1 200"), response)
         self.assertNotIn("private file outside the document root", response)
+
+    def test_cgi_large_output(self):
+        response = self.send_raw_request("GET /cgi/large.py HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("A" * 1000, response)
+
+    def test_cgi_large_output(self):
+        response = self.send_raw_request("GET /cgi/large.py HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(response.startswith("HTTP/1.1 200"), response)
+        self.assertIn("A" * 1000, response)

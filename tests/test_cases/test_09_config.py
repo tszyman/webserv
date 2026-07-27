@@ -76,3 +76,25 @@ class TestConfigParser(unittest.TestCase):
         
         # Parser should have caught the exception and returned false (FAILED_CONFIG_PARSER)
         self.assertEqual(out[0], "FAILED_CONFIG_PARSER")
+
+    def test_reject_partial_cgi_metadata(self):
+        """Verify Config parser rejects a location with only one CGI directive"""
+        bad_conf = "bad_cgi.conf"
+        with open(bad_conf, "w") as f:
+            f.write("""
+            server {
+                listen 9091;
+                server_name test.local;
+
+                location /cgi {
+                    root /var/www/api;
+                    allowed_methods GET;
+                    cgi_extension .py;
+                }
+            }
+            """)
+
+        out = self.run_tester(bad_conf)
+        os.remove(bad_conf)
+
+        self.assertEqual(out[0], "FAILED_CONFIG_PARSER")
