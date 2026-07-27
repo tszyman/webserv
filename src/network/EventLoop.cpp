@@ -199,6 +199,8 @@ void EventLoop::run()
 	{
 		int current_fd = fds[i].fd;
 		short revents = fds[i].revents;
+		bool is_cgi_read_fd = _cgi_states.find(current_fd) != _cgi_states.end();
+		bool is_cgi_write_fd = _cgi_write_to_read.find(current_fd) != _cgi_write_to_read.end();
 
 		bool is_server_socket = false;
 		SocketEngine* active_engine = NULL;
@@ -214,7 +216,8 @@ void EventLoop::run()
 		}
 
 		// 1. IO Multiplexing Safeguard: Detect errors and broken connections
-		if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		if ((revents & (POLLERR | POLLNVAL | POLLHUP))
+			&& !is_cgi_read_fd && !is_cgi_write_fd)
 		{
 			Logger::warning(std::string("Socket error/hangup detected on FD: ") +StringUtils::to_string(current_fd));
 		
@@ -229,7 +232,7 @@ void EventLoop::run()
 			continue; // skip to next FD
 		}
 		// 2. Main read handling with POLLIN
-		if (revents & POLLIN)
+		if ((revents & POLLIN) || (is_cgi_read_fd && (revents & POLLHUP)))
 		{
 			if (is_server_socket)
 			{
@@ -251,14 +254,48 @@ void EventLoop::run()
 				{
 					CgiState& state = cgiIt->second;
 					char cgi_buffer[4096];
-					ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
-					if (bytes_read > 0)
+					bool eof = false;
+					while (true)
 					{
-						state.output.append(cgi_buffer, bytes_read);
+						ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
+						if (bytes_read > 0)
+						{
+							state.output.append(cgi_buffer, bytes_read);
+							continue;
+						}
+						if (bytes_read == 0)
+						{
+							eof = true;
+							break;
+						}
+						if (errno == EAGAIN || errno == EWOULDBLOCK)
+							break;
+
+						Logger::warning("CGI stdout read failed on FD: " + StringUtils::to_string(current_fd));
+						Connection* client_conn = state.client;
+						HttpResponse errorResponse;
+						ErrorPage::tryBuildDefault(500, errorResponse);
+						client_conn->appendResponse(errorResponse.toString());
+						if (!state.requestBodyClosed)
+						{
+							close(state.writeFd);
+							_poller.removeFd(state.writeFd);
+							_cgi_write_to_read.erase(state.writeFd);
+							state.requestBodyClosed = true;
+						}
+						close(current_fd);
+						_poller.removeFd(current_fd);
+						_cgi_states.erase(cgiIt);
+						if (_connections.find(client_conn->getFd()) != _connections.end())
+							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+						eof = false;
+						break;
 					}
-					else
+
+					if (eof)
 					{
 						Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
+						Connection* client_conn = state.client;
 						if (!state.requestBodyClosed)
 						{
 							close(state.writeFd);
@@ -270,44 +307,12 @@ void EventLoop::run()
 						waitpid(state.pid, &status, 0);
 						HttpResponse response;
 						parseCgiOutput(state.output, response);
-						state.client->appendResponse(response.toString());
+						client_conn->appendResponse(response.toString());
 						close(current_fd);
 						_poller.removeFd(current_fd);
 						_cgi_states.erase(cgiIt);
-						_poller.setEvents(state.client->getFd(), POLLIN | POLLOUT);
-					}
-				}
-			}
-			else if (_cgi_write_to_read.find(current_fd) != _cgi_write_to_read.end())
-			{
-				int read_fd = _cgi_write_to_read[current_fd];
-				std::map<int, CgiState>::iterator cgiIt = _cgi_states.find(read_fd);
-				if (cgiIt != _cgi_states.end())
-				{
-					CgiState& state = cgiIt->second;
-					if (!state.requestBodyClosed && state.requestBodyOffset < state.requestBody.size())
-					{
-						ssize_t written = write(current_fd, state.requestBody.data() + state.requestBodyOffset,
-							state.requestBody.size() - state.requestBodyOffset);
-						if (written > 0)
-							state.requestBodyOffset += static_cast<size_t>(written);
-						else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
-						{
-							Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
-							close(current_fd);
-							_poller.removeFd(current_fd);
-							close(state.readFd);
-							_poller.removeFd(state.readFd);
-							_cgi_write_to_read.erase(current_fd);
-							_cgi_states.erase(cgiIt);
-						}
-					}
-					if (state.requestBodyOffset >= state.requestBody.size() && !state.requestBodyClosed)
-					{
-						close(current_fd);
-						_poller.removeFd(current_fd);
-						_cgi_write_to_read.erase(current_fd);
-						state.requestBodyClosed = true;
+						if (_connections.find(client_conn->getFd()) != _connections.end())
+							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
 					}
 				}
 			}
@@ -422,7 +427,41 @@ void EventLoop::run()
 
 	if (revents & POLLOUT)
 	{
-		if(_connections.find(current_fd) != _connections.end())
+		if (_cgi_write_to_read.find(current_fd) != _cgi_write_to_read.end())
+		{
+			int read_fd = _cgi_write_to_read[current_fd];
+			std::map<int, CgiState>::iterator cgiIt = _cgi_states.find(read_fd);
+			if (cgiIt != _cgi_states.end())
+			{
+				CgiState& state = cgiIt->second;
+				if (!state.requestBodyClosed && state.requestBodyOffset < state.requestBody.size())
+				{
+					ssize_t written = write(current_fd, state.requestBody.data() + state.requestBodyOffset,
+						state.requestBody.size() - state.requestBodyOffset);
+					if (written > 0)
+						state.requestBodyOffset += static_cast<size_t>(written);
+					else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+					{
+						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
+						close(current_fd);
+						_poller.removeFd(current_fd);
+						close(state.readFd);
+						_poller.removeFd(state.readFd);
+						_cgi_write_to_read.erase(current_fd);
+						_cgi_states.erase(cgiIt);
+						continue;
+					}
+				}
+				if (state.requestBodyOffset >= state.requestBody.size() && !state.requestBodyClosed)
+				{
+					close(current_fd);
+					_poller.removeFd(current_fd);
+					_cgi_write_to_read.erase(current_fd);
+					state.requestBodyClosed = true;
+				}
+			}
+		}
+		else if(_connections.find(current_fd) != _connections.end())
 		{
 			Connection* conn = _connections[current_fd];
 			std::string& response = conn->getResponseBuffer();
