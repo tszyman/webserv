@@ -514,7 +514,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 		else
 		{
 			Logger::warning("GET Error: Directory listing is disabled - " + physicalPath);
-			response = buildErrorResponse(403, location);
+			response = buildErrorResponse(404, location);
 			return;
 		}
 	}
@@ -522,7 +522,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
 	{
 		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
-		response = buildErrorResponse(403, location);
+		response = buildErrorResponse(404, location);
 		return;
 	}
 	// check permission for read
