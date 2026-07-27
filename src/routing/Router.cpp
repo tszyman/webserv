@@ -309,12 +309,12 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 	if (!hasExtension(physicalPath, location->getCgiExtension()))
 		return false;
 
-	struct stat info;
-	if (stat(physicalPath.c_str(), &info) != 0 || S_ISDIR(info.st_mode))
-	{
-		response = buildErrorResponse(404, location);
-		return true;
-	}
+	// struct stat info;
+	// if (stat(physicalPath.c_str(), &info) != 0 || S_ISDIR(info.st_mode))
+	// {
+	// 	response = buildErrorResponse(404, location);
+	// 	return true;
+	// }
 
 	CgiHandler cgi;
 	if (!cgi.init(request, physicalPath, location->getCgiExecutable()))
