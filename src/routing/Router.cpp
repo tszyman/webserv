@@ -504,6 +504,7 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 	}
 
 	parseCgiOutput(output, response);
+	response.setConnectionClose(true);
 	return true;
 }
 
