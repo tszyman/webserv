@@ -4,8 +4,9 @@
 #include <iostream>
 
 Connection::Connection(int fd, size_t maxBodySize, const std::string& listeningHost, int listeningPort)
-	: _fd(fd), _parser(maxBodySize), _listening_host(listeningHost),
-	_listening_port(listeningPort), _max_body_size(maxBodySize)
+    : _fd(fd), _response_buffer(), _close_after_response(false), _drain_after_response(false), _parser(maxBodySize),
+    _listening_host(listeningHost), _listening_port(listeningPort), _last_activity(0),
+    _max_body_size(maxBodySize)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
     _last_activity = time(NULL);
@@ -45,6 +46,26 @@ std::string& Connection::getResponseBuffer()
     return _response_buffer;
 }
 
+void Connection::setCloseAfterResponse(bool closeAfterResponse)
+{
+	_close_after_response = closeAfterResponse;
+}
+
+bool Connection::shouldCloseAfterResponse() const
+{
+	return _close_after_response;
+}
+
+void Connection::setDrainAfterResponse(bool drainAfterResponse)
+{
+    _drain_after_response = drainAfterResponse;
+}
+
+bool Connection::shouldDrainAfterResponse() const
+{
+    return _drain_after_response;
+}
+
 void Connection::eraseSentData(size_t bytes)
 {
     _response_buffer.erase(0, bytes);
@@ -54,6 +75,8 @@ void Connection::reset()
 {
     _parser = RequestParser(_max_body_size);
     _response_buffer.clear();
+    _close_after_response = false;
+    _drain_after_response = false;
     updateLastActivity();
 }
 

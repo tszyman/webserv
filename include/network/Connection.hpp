@@ -11,6 +11,8 @@ class Connection // class representing client
     private:
         int _fd;
         std::string _response_buffer;
+        bool _close_after_response;
+        bool _drain_after_response;
         RequestParser _parser;
 		std::string _listening_host;
 		int _listening_port;
@@ -33,6 +35,10 @@ class Connection // class representing client
 
         void appendResponse(const std::string& data);
         std::string& getResponseBuffer();
+        void setCloseAfterResponse(bool closeAfterResponse);
+        bool shouldCloseAfterResponse() const;
+        void setDrainAfterResponse(bool drainAfterResponse);
+        bool shouldDrainAfterResponse() const;
         void eraseSentData(size_t bytes);
         void reset();
         void updateLastActivity();

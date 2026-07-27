@@ -49,6 +49,11 @@ void HttpResponse::setConnectionClose(bool closeConnection)
     _closeConnection = closeConnection;
 }
 
+bool HttpResponse::shouldCloseConnection() const
+{
+    return _closeConnection;
+}
+
 void HttpResponse::setSuppressBody(bool suppressBody)
 {
     _suppressBody = suppressBody;

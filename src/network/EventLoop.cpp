@@ -217,21 +217,50 @@ void EventLoop::run()
 				conn->getParser().feed(buffer, bytes_read);
 				RequestParser::ParseState parseState = conn->getParser().getParseState();
 				RequestParser::ParserState state = conn->getParser().getState();
+					if (conn->shouldDrainAfterResponse())
+					{
+						if (parseState == RequestParser::PARSE_INCOMPLETE)
+							continue;
+						if (parseState == RequestParser::PARSE_SUCCESS)
+							continue;
+					}
+					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
+					std::string host = "";
+					std::map<std::string, std::string>::const_iterator it = headers.find("host");
+					if (it != headers.end())
+						host = it->second;
+					const ServerConfig* current_config = matchServerConfig(host,
+						conn->getListeningHost(), conn->getListeningPort());
+					Router router;
+					if (current_config != NULL)
+					{
+						for (size_t i = 0; i < current_config->locations.size(); ++i)
+						{
+							router.addLocation(current_config->locations[i]);
+						}
+					}
+
+					if (parseState == RequestParser::PARSE_INCOMPLETE && state == RequestParser::STATE_BODY && current_config != NULL)
+					{
+						HttpResponse response;
+						if (router.rejectMissingCgiTarget(conn->getParser(), response))
+						{
+							Logger::debug("Response ready: " + StringUtils::to_string(response.getStatusCode())
+								+ " for path " + conn->getParser().getPath());
+								conn->setDrainAfterResponse(true);
+								response.setConnectionClose(false);
+								conn->setCloseAfterResponse(false);
+							conn->appendResponse(response.toString());
+								_poller.setEvents(current_fd, POLLIN | POLLOUT);
+							continue;
+						}
+					}
 
 				if (parseState == RequestParser::PARSE_SUCCESS)
 				{
 					Logger::info("Request fully parsed! Path: " + conn->getParser().getPath());
 
 					HttpResponse response;
-					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
-					std::string host = "";
-					std::map<std::string, std::string>::const_iterator it = headers.find("host");
-					if (it != headers.end())
-						host = it->second;
-					
-					const ServerConfig* current_config = matchServerConfig(host,
-						conn->getListeningHost(), conn->getListeningPort());
-
 					if (conn->getParser().getVersion() == "HTTP/1.1" && host.empty())
 					{
 						ErrorPage::tryBuildDefault(400, response);
@@ -259,6 +288,9 @@ void EventLoop::run()
 					}
 					else
 					{
+						Logger::debug("Response ready: " + StringUtils::to_string(response.getStatusCode())
+							+ " for path " + conn->getParser().getPath());
+					conn->setCloseAfterResponse(response.shouldCloseConnection());
 					conn->appendResponse(response.toString());
 					_poller.setEvents(current_fd, POLLIN | POLLOUT);
 					}
@@ -301,6 +333,25 @@ void EventLoop::run()
 
 				if(conn->getResponseBuffer().empty())
 				{
+					if (conn->shouldDrainAfterResponse())
+					{
+						RequestParser::ParseState drainedState = conn->getParser().getParseState();
+						if (drainedState == RequestParser::PARSE_INCOMPLETE)
+						{
+							_poller.setEvents(current_fd, POLLIN);
+							continue;
+						}
+						if (drainedState == RequestParser::PARSE_SUCCESS || drainedState == RequestParser::PARSE_ERROR)
+						{
+							Logger::info("Connection: close requested. Closing FD " + StringUtils::to_string(current_fd));
+							close(current_fd);
+							delete conn;
+							_connections.erase(current_fd);
+							_poller.removeFd(current_fd);
+							continue;
+						}
+					}
+
 					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
 					// A malformed or oversized request cannot safely be reused as a
 					// persistent connection: parsing may have stopped before all
@@ -313,6 +364,10 @@ void EventLoop::run()
 					{
 						keep_alive = false;
 					}
+						if (conn->shouldCloseAfterResponse())
+						{
+							keep_alive = false;
+						}
 
 					if (keep_alive)
 					{

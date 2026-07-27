@@ -12,6 +12,7 @@ class Router {
 		Router();
 
 		void addLocation(const LocationConfig& location);
+		bool rejectMissingCgiTarget(const RequestParser& request, HttpResponse& response) const;
 
 		void route(const RequestParser& request, HttpResponse& response) const;
 

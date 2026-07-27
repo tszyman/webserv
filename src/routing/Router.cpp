@@ -235,6 +235,31 @@ void Router::addLocation(const LocationConfig& location)
 	_locations.push_back(location);
 }
 
+bool Router::rejectMissingCgiTarget(const RequestParser& request, HttpResponse& response) const
+{
+	if (request.getMethod() != "POST")
+		return false;
+
+	const LocationConfig* location = matchLocation(request.getPath());
+	if (location == NULL)
+		return false;
+	if (location->getCgiExtension().empty() || location->getCgiExecutable().empty())
+		return false;
+
+	std::string physicalPath = translatePath(request.getPath(), location);
+	if (!hasExtension(physicalPath, location->getCgiExtension()))
+		return false;
+
+	struct stat info;
+	if (stat(physicalPath.c_str(), &info) != 0 || S_ISDIR(info.st_mode))
+	{
+		response = buildErrorResponse(404, location);
+		response.setConnectionClose(false);
+		return true;
+	}
+	return false;
+}
+
 // Prefix matching
 const LocationConfig* Router::matchLocation(const std::string& uri) const
 {
