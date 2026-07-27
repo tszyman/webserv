@@ -6,11 +6,11 @@
 
 HttpResponse::HttpResponse()
     : _statusCode(200), _headers(), _body(), _closeConnection(false),
-                _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1) {}
+                _suppressBody(false), _is_cgi(false), _cgi_read_fd(-1), _cgi_pid(-1) {}
 
 HttpResponse::HttpResponse(int statusCode, const std::string &body)
     : _statusCode(statusCode), _headers(), _body(body), _closeConnection(false),
-            _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1) {}
+            _suppressBody(false), _is_cgi(false), _cgi_read_fd(-1), _cgi_pid(-1) {}
 
 HttpResponse::~HttpResponse(){}
 
@@ -49,6 +49,11 @@ void HttpResponse::setConnectionClose(bool closeConnection)
     _closeConnection = closeConnection;
 }
 
+void HttpResponse::setSuppressBody(bool suppressBody)
+{
+    _suppressBody = suppressBody;
+}
+
 std::string HttpResponse::toString() const
 {
     std::ostringstream output;
@@ -70,7 +75,7 @@ std::string HttpResponse::toString() const
         output << "Connection: close\r\n";
     output << "\r\n";
 
-    if (bodyAllowed)
+    if (bodyAllowed && !_suppressBody)
         output << _body;
 
     return output.str(); 

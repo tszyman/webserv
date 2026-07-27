@@ -22,6 +22,7 @@ class HttpResponse
         void setBody(const std::string &body);
         void setHeader(const std::string &name, const std::string &value);
         void setConnectionClose(bool closeConnection);
+        void setSuppressBody(bool suppressBody);
         void serveStaticFile(const std::string& filePath);
 
         std::string toString() const;
@@ -38,6 +39,7 @@ class HttpResponse
             HeaderMap _headers;
             std::string _body;
             bool _closeConnection;
+            bool _suppressBody;
             bool _is_cgi;
             int _cgi_read_fd;
             int _cgi_write_fd;
