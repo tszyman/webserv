@@ -384,6 +384,8 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 {
 	if (location == NULL)
 		return false;
+	if (request.getMethod() != "POST")
+		return false;
 	if (location->getCgiExtension().empty() || location->getCgiExecutable().empty())
 		return false;
 	if (!hasExtension(physicalPath, location->getCgiExtension()))
