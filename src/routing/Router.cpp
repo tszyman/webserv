@@ -155,90 +155,6 @@ static bool hasExtension(const std::string& path, const std::string& extension)
 	return path.compare(path.length() - extension.length(), extension.length(), extension) == 0;
 }
 
-static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
-{
-	std::string::size_type separator = rawOutput.find("\r\n\r\n");
-	std::string::size_type separatorLength = 4;
-	if (separator == std::string::npos)
-	{
-		separator = rawOutput.find("\n\n");
-		separatorLength = 2;
-	}
-
-	std::string headerBlock;
-	std::string body;
-	if (separator == std::string::npos)
-	{
-		body = rawOutput;
-	}
-	else
-	{
-		headerBlock = rawOutput.substr(0, separator);
-		body = rawOutput.substr(separator + separatorLength);
-	}
-
-	int statusCode = 200;
-	bool hasContentType = false;
-	std::string::size_type lineStart = 0;
-	while (lineStart < headerBlock.size())
-	{
-		std::string::size_type lineEnd = headerBlock.find("\n", lineStart);
-		std::string line;
-		if (lineEnd == std::string::npos)
-			line = headerBlock.substr(lineStart);
-		else
-			line = headerBlock.substr(lineStart, lineEnd - lineStart);
-		if (!line.empty() && line[line.length() - 1] == '\r')
-			line.erase(line.length() - 1);
-		if (!line.empty())
-		{
-			std::string::size_type colon = line.find(':');
-			if (colon != std::string::npos)
-			{
-				std::string key = line.substr(0, colon);
-				std::string value = line.substr(colon + 1);
-				while (!value.empty() && (value[0] == ' ' || value[0] == '\t'))
-					value.erase(0, 1);
-				if (key == "Status")
-				{
-					statusCode = std::atoi(value.c_str());
-				}
-				else if (key == "Content-Type")
-				{
-					response.setHeader("Content-Type", value);
-					hasContentType = true;
-				}
-				else
-				{
-					response.setHeader(key, value);
-				}
-			}
-		}
-		if (lineEnd == std::string::npos)
-			break;
-		lineStart = lineEnd + 1;
-	}
-
-	response.setStatusCode(statusCode);
-	response.setBody(body);
-	if (!hasContentType)
-		response.setHeader("Content-Type", "text/plain");
-	return true;
-}
-
-static bool writeAll(int fd, const char* data, size_t size)
-{
-	size_t totalWritten = 0;
-	while (totalWritten < size)
-	{
-		ssize_t written = write(fd, data + totalWritten, size - totalWritten);
-		if (written < 0)
-			return false;
-		totalWritten += static_cast<size_t>(written);
-	}
-	return true;
-}
-
 Router::Router() {}
 
 void Router::addLocation(const LocationConfig& location)
@@ -402,42 +318,7 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 		response = buildErrorResponse(500, location);
 		return true;
 	}
-
-	const std::vector<char>& body = request.getBody();
-	if (!body.empty())
-	{
-		if (!writeAll(cgi.getWriteFd(), &body[0], body.size()))
-		{
-			close(cgi.getWriteFd());
-			close(cgi.getReadFd());
-			waitpid(cgi.getPid(), NULL, 0);
-			response = buildErrorResponse(500, location);
-			return true;
-		}
-	}
-	close(cgi.getWriteFd());
-
-	int flags = fcntl(cgi.getReadFd(), F_GETFL, 0);
-	if (flags != -1)
-		fcntl(cgi.getReadFd(), F_SETFL, flags & ~O_NONBLOCK);
-
-	std::string output;
-	char buffer[1024];
-	ssize_t bytesRead = 0;
-	while ((bytesRead = read(cgi.getReadFd(), buffer, sizeof(buffer))) > 0)
-		output.append(buffer, static_cast<size_t>(bytesRead));
-	close(cgi.getReadFd());
-
-		int status = 0;
-		waitpid(cgi.getPid(), &status, 0);
-
-	if (output.empty())
-	{
-		response = buildErrorResponse(500, location);
-		return true;
-	}
-
-	parseCgiOutput(output, response);
+	response.setCgi(cgi.getReadFd(), cgi.getWriteFd(), cgi.getPid());
 	return true;
 }
 
@@ -604,7 +485,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 	CgiHandler cgi;
 	if (cgi.init(request, scriptPath, cgiExecutable))
 	{
-		response.setCgi(cgi.getReadFd(), cgi.getPid());
+		response.setCgi(cgi.getReadFd(), cgi.getWriteFd(), cgi.getPid());
 	}
 	else
 	{

@@ -6,11 +6,11 @@
 
 HttpResponse::HttpResponse()
     : _statusCode(200), _headers(), _body(), _closeConnection(false),
-        _is_cgi(false), _cgi_read_fd(-1), _cgi_pid(-1) {}
+                _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1) {}
 
 HttpResponse::HttpResponse(int statusCode, const std::string &body)
     : _statusCode(statusCode), _headers(), _body(body), _closeConnection(false),
-      _is_cgi(false), _cgi_read_fd(-1), _cgi_pid(-1) {}
+            _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1) {}
 
 HttpResponse::~HttpResponse(){}
 
@@ -99,10 +99,11 @@ void HttpResponse::serveStaticFile(const std::string& filePath)
     }
 }
 
-void HttpResponse::setCgi(int readFd, pid_t pid)
+void HttpResponse::setCgi(int readFd, int writeFd, pid_t pid)
 {
     _is_cgi = true;
     _cgi_read_fd = readFd;
+    _cgi_write_fd = writeFd;
     _cgi_pid = pid;
 }
 
@@ -114,6 +115,11 @@ bool HttpResponse::isCgi() const
 int HttpResponse::getCgiReadFd() const
 {
     return _cgi_read_fd;
+}
+
+int HttpResponse::getCgiWriteFd() const
+{
+    return _cgi_write_fd;
 }
 
 pid_t HttpResponse::getCgiPid() const

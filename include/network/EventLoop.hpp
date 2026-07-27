@@ -14,18 +14,33 @@
 class EventLoop
 {
     private:
+        struct CgiState
+        {
+            Connection* client;
+            pid_t pid;
+            int readFd;
+            int writeFd;
+            std::string requestBody;
+            size_t requestBodyOffset;
+            bool requestBodyClosed;
+            std::string output;
+        };
+
         Poller          _poller;
 
         std::map<int, Connection*> _connections;
         std::vector<SocketEngine*> _server_engines;
         std::vector<ServerConfig>   _servers;
-        std::map<int, Connection*> _cgi_connections;
+        std::map<int, CgiState> _cgi_states;
+        std::map<int, int> _cgi_write_to_read;
 
         EventLoop(const EventLoop& other);
         EventLoop& operator=(const EventLoop& other);
 		const ServerConfig* matchServerConfig(const std::string& hostHeader,
 			const std::string& listeningHost, int listeningPort) const;
         size_t getMaxBodySizeForEndpoint(const std::string& host, int port) const;
+        static bool writeAll(int fd, const std::string& data);
+        static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response);
 
     public:
         static bool is_running;
