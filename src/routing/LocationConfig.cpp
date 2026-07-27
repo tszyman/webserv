@@ -53,6 +53,9 @@ bool LocationConfig::isMethodAllowed(const std::string& method) const
 {
 	if(_allowedMethods.empty())
 		return false;
+	if (method == "HEAD"
+		&& std::find(_allowedMethods.begin(), _allowedMethods.end(), "GET") != _allowedMethods.end())
+		return true;
 	return (std::find(_allowedMethods.begin(), _allowedMethods.end(), method) != _allowedMethods.end());
 }
 

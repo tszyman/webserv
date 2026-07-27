@@ -368,8 +368,10 @@ void Router::route(const RequestParser& request, HttpResponse& response) const
 
 	// 3. Translate the path and route to the correct handler
 
-	if (request.getMethod() == "GET"){
+	if (request.getMethod() == "GET" || request.getMethod() == "HEAD"){
 		handleGet(requestPath, physicalPath, location, response);
+		if (request.getMethod() == "HEAD")
+			response.setSuppressBody(true);
 	} else if (request.getMethod() == "POST") {
 		handlePost(request, location, response);
 	} else if (request.getMethod() == "DELETE"){

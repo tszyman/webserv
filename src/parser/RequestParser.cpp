@@ -26,7 +26,7 @@ static bool isRecognizedMethod(const std::string& method)
 
 static bool isImplementedMethod(const std::string& method)
 {
-	return method == "GET" || method == "POST" || method == "DELETE";
+	return method == "GET" || method == "HEAD" || method == "POST" || method == "DELETE";
 }
 
 RequestParser::RequestParser(size_t maxBodySize) 
