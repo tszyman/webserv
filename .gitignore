@@ -6,3 +6,4 @@ webserv
 __pycache__
 unit_tester
 .github/
+.vscode
