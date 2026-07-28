@@ -487,6 +487,9 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 		return;
 	}
 
+	if (!location->getCgiExtension().empty() && !hasExtension(scriptPath, location->getCgiExtension()))
+		return;
+
 	Logger::info("CGI execution triggered for: " + scriptPath + " using executable: " + cgiExecutable);
 
 	CgiHandler cgi;

@@ -29,6 +29,11 @@ const HttpResponse::HeaderMap &HttpResponse::getHeaders() const
     return _headers;
 }
 
+bool HttpResponse::shouldCloseConnection() const
+{
+    return _closeConnection;
+}
+
 void HttpResponse::setStatusCode(int statusCode)
 {
     _statusCode = statusCode;

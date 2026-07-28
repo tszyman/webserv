@@ -167,6 +167,7 @@ void EventLoop::queueResponse(Connection* connection, const HttpResponse& respon
 #endif
 
 	connection->appendResponse(rawResponse);
+	connection->setCloseAfterResponse(response.shouldCloseConnection());
 	_poller.setEvents(connection->getFd(), POLLIN | POLLOUT);
 }
 
@@ -435,6 +436,7 @@ void EventLoop::run()
 						ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
 
 					queueResponse(conn, response);
+						_poller.setEvents(current_fd, POLLOUT);
 				}
 			}
 		}
@@ -502,7 +504,8 @@ void EventLoop::run()
 					// persistent connection: parsing may have stopped before all
 					// headers (including Connection) were read.
 					bool keep_alive = conn->getParser().getState() != RequestParser::STATE_ERROR
-						&& conn->getParser().getState() != RequestParser::STATE_PAYLOAD_TOO_LARGE;
+						&& conn->getParser().getState() != RequestParser::STATE_PAYLOAD_TOO_LARGE
+						&& !conn->shouldCloseAfterResponse();
 
 					std::map<std::string, std::string>::const_iterator it = headers.find("connection");
 					if (it != headers.end() && it->second == "close")

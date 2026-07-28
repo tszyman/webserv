@@ -17,6 +17,7 @@ class HttpResponse
         int getStatusCode() const;
         const std::string &getBody() const;
         const HeaderMap &getHeaders() const;
+        bool shouldCloseConnection() const;
 
         void setStatusCode(int statusCode);
         void setBody(const std::string &body);

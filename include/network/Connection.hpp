@@ -16,6 +16,7 @@ class Connection // class representing client
 		int _listening_port;
         time_t _last_activity;
         size_t _max_body_size;
+        bool _close_after_response;
 
         // Block copy (cannot exist the same FD)
         Connection(const Connection& other);
@@ -34,6 +35,8 @@ class Connection // class representing client
         void appendResponse(const std::string& data);
         std::string& getResponseBuffer();
         void eraseSentData(size_t bytes);
+        void setCloseAfterResponse(bool closeAfterResponse);
+        bool shouldCloseAfterResponse() const;
         void reset();
         void updateLastActivity();
         bool isTimedOut(int timeout_second) const;
