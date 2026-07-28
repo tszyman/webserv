@@ -40,7 +40,14 @@ void print_parser_result(const RequestParser &parser) {
         std::map<std::string, std::string> headers = parser.getHeaders();
         std::map<std::string, std::string>::const_iterator it;
         for (it = headers.begin(); it != headers.end(); ++it) {
-            std::cout << "H-" << it->first << ": " << it->second << std::endl;
+            std::string headerName = it->first;
+            bool capitalizeNext = true;
+            for (size_t i = 0; i < headerName.size(); ++i) {
+                if (capitalizeNext && headerName[i] >= 'a' && headerName[i] <= 'z')
+                    headerName[i] = static_cast<char>(headerName[i] - 'a' + 'A');
+                capitalizeNext = (headerName[i] == '-');
+            }
+            std::cout << "H-" << headerName << ": " << it->second << std::endl;
         }
 
         // Print Body Content

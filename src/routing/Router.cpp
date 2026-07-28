@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <poll.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -153,6 +155,77 @@ static bool hasExtension(const std::string& path, const std::string& extension)
 	if (path.length() < extension.length())
 		return false;
 	return path.compare(path.length() - extension.length(), extension.length(), extension) == 0;
+}
+
+static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
+{
+	std::string::size_type separator = rawOutput.find("\r\n\r\n");
+	std::string::size_type separatorLength = 4;
+	if (separator == std::string::npos)
+	{
+		separator = rawOutput.find("\n\n");
+		separatorLength = 2;
+	}
+
+	std::string headerBlock;
+	std::string body;
+	if (separator == std::string::npos)
+	{
+		body = rawOutput;
+	}
+	else
+	{
+		headerBlock = rawOutput.substr(0, separator);
+		body = rawOutput.substr(separator + separatorLength);
+	}
+
+	int statusCode = 200;
+	bool hasContentType = false;
+	std::string::size_type lineStart = 0;
+	while (lineStart < headerBlock.size())
+	{
+		std::string::size_type lineEnd = headerBlock.find("\n", lineStart);
+		std::string line;
+		if (lineEnd == std::string::npos)
+			line = headerBlock.substr(lineStart);
+		else
+			line = headerBlock.substr(lineStart, lineEnd - lineStart);
+		if (!line.empty() && line[line.length() - 1] == '\r')
+			line.erase(line.length() - 1);
+		if (!line.empty())
+		{
+			std::string::size_type colon = line.find(':');
+			if (colon != std::string::npos)
+			{
+				std::string key = line.substr(0, colon);
+				std::string value = line.substr(colon + 1);
+				while (!value.empty() && (value[0] == ' ' || value[0] == '\t'))
+					value.erase(0, 1);
+				if (key == "Status")
+				{
+					statusCode = std::atoi(value.c_str());
+				}
+				else if (key == "Content-Type")
+				{
+					response.setHeader("Content-Type", value);
+					hasContentType = true;
+				}
+				else
+				{
+					response.setHeader(key, value);
+				}
+			}
+		}
+		if (lineEnd == std::string::npos)
+			break;
+		lineStart = lineEnd + 1;
+	}
+
+	response.setStatusCode(statusCode);
+	response.setBody(body);
+	if (!hasContentType)
+		response.setHeader("Content-Type", "text/plain");
+	return true;
 }
 
 Router::Router() {}
@@ -300,6 +373,8 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 {
 	if (location == NULL)
 		return false;
+	if (request.getMethod() != "POST")
+		return false;
 	if (location->getCgiExtension().empty() || location->getCgiExecutable().empty())
 		return false;
 	if (!hasExtension(physicalPath, location->getCgiExtension()))
@@ -318,7 +393,118 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 		response = buildErrorResponse(500, location);
 		return true;
 	}
-	response.setCgi(cgi.getReadFd(), cgi.getWriteFd(), cgi.getPid());
+
+	const std::vector<char>& body = request.getBody();
+	std::string output;
+	const int readFd = cgi.getReadFd();
+	const int writeFd = cgi.getWriteFd();
+	size_t bodyOffset = 0;
+	bool writeClosed = false;
+	bool readClosed = false;
+
+	if (body.empty())
+	{
+		close(writeFd);
+		writeClosed = true;
+	}
+
+	while (!readClosed)
+	{
+		struct pollfd pollFds[2];
+		int pollCount = 0;
+		int writeIndex = -1;
+		int readIndex = -1;
+
+		if (!writeClosed)
+		{
+			pollFds[pollCount].fd = writeFd;
+			pollFds[pollCount].events = POLLOUT;
+			pollFds[pollCount].revents = 0;
+			writeIndex = pollCount;
+			++pollCount;
+		}
+
+		pollFds[pollCount].fd = readFd;
+		pollFds[pollCount].events = POLLIN;
+		pollFds[pollCount].revents = 0;
+		readIndex = pollCount;
+		++pollCount;
+
+		int pollResult;
+		do
+		{
+			pollResult = poll(pollFds, pollCount, -1);
+		} while (pollResult < 0 && errno == EINTR);
+
+		if (pollResult < 0)
+		{
+			if (!writeClosed)
+				close(writeFd);
+			close(readFd);
+			waitpid(cgi.getPid(), NULL, 0);
+			response = buildErrorResponse(500, location);
+			return true;
+		}
+
+		if (writeIndex != -1 && (pollFds[writeIndex].revents & POLLOUT))
+		{
+			if (bodyOffset < body.size())
+			{
+				const size_t remaining = body.size() - bodyOffset;
+				const size_t chunkSize = remaining > 4096 ? 4096 : remaining;
+				ssize_t bytesWritten = write(writeFd, &body[bodyOffset], chunkSize);
+				if (bytesWritten > 0)
+				{
+					bodyOffset += static_cast<size_t>(bytesWritten);
+					if (bodyOffset == body.size())
+					{
+						close(writeFd);
+						writeClosed = true;
+					}
+				}
+				else if (bytesWritten < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+				{
+					if (!writeClosed)
+						close(writeFd);
+					close(readFd);
+					waitpid(cgi.getPid(), NULL, 0);
+					response = buildErrorResponse(500, location);
+					return true;
+				}
+			}
+		}
+
+		if (readIndex != -1 && (pollFds[readIndex].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
+		{
+			char buffer[4096];
+			ssize_t bytesRead = 0;
+			while ((bytesRead = read(readFd, buffer, sizeof(buffer))) > 0)
+				output.append(buffer, static_cast<size_t>(bytesRead));
+			if (bytesRead == 0)
+				readClosed = true;
+			else if (bytesRead < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+			{
+				if (!writeClosed)
+					close(writeFd);
+				close(readFd);
+				waitpid(cgi.getPid(), NULL, 0);
+				response = buildErrorResponse(500, location);
+				return true;
+			}
+		}
+	}
+
+	close(readFd);
+	waitpid(cgi.getPid(), NULL, 0);
+
+	if (output.empty())
+	{
+		response = buildErrorResponse(500, location);
+		return true;
+	}
+
+	parseCgiOutput(output, response);
+	response.setConnectionClose(true);
 	return true;
 }
 
@@ -395,7 +581,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 		else
 		{
 			Logger::warning("GET Error: Directory listing is disabled - " + physicalPath);
-			response = buildErrorResponse(403, location);
+			response = buildErrorResponse(404, location);
 			return;
 		}
 	}
@@ -403,7 +589,7 @@ void Router::handleGet(const std::string& requestUri, const std::string& physica
 	if (stat(targetPath.c_str(), &pathStat) != 0 || S_ISDIR(pathStat.st_mode))
 	{
 		Logger::warning("GET Error: Index file not found in directory - " + targetPath);
-		response = buildErrorResponse(403, location);
+		response = buildErrorResponse(404, location);
 		return;
 	}
 	// check permission for read
@@ -466,10 +652,13 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 
 	if (location != NULL)
 	{
-		cgiExecutable = location->getPath();
+		cgiExecutable = location->getCgiExecutable();
 		if (!location->getRoot().empty())
 		{
-			scriptPath = location->getRoot() + request.getPath();
+			if (request.getPath() == location->getPath())
+				scriptPath = location->getRoot() + request.getPath();
+			else
+				scriptPath = translatePath(request.getPath(), location);
 		}
 	}
 
