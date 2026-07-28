@@ -7,6 +7,9 @@
 #include <errno.h>
 #include <sys/wait.h>
 
+// Set to 0 to stop printing complete HTTP responses during debugging.
+#define WEBSERV_LOG_RESPONSES 0
+
 static std::string trimTrailingCrlf(const std::string& line)
 {
 	std::string result = line;
@@ -153,6 +156,20 @@ const ServerConfig* EventLoop::matchServerConfig(const std::string& hostHeader,
 	return NULL;
 }
 
+void EventLoop::queueResponse(Connection* connection, const HttpResponse& response)
+{
+	const std::string rawResponse = response.toString();
+
+#if WEBSERV_LOG_RESPONSES
+	Logger::debug("----- HTTP response for FD "
+		+ StringUtils::to_string(connection->getFd())
+		+ " -----\n" + rawResponse + "\n----- end HTTP response -----");
+#endif
+
+	connection->appendResponse(rawResponse);
+	_poller.setEvents(connection->getFd(), POLLIN | POLLOUT);
+}
+
 void EventLoop::run()
 {
 	Logger::info("Starting the minimal event loop...");
@@ -275,7 +292,7 @@ void EventLoop::run()
 						Connection* client_conn = state.client;
 						HttpResponse errorResponse;
 						ErrorPage::tryBuildDefault(500, errorResponse);
-						client_conn->appendResponse(errorResponse.toString());
+						queueResponse(client_conn, errorResponse);
 						if (!state.requestBodyClosed)
 						{
 							close(state.writeFd);
@@ -307,7 +324,7 @@ void EventLoop::run()
 						waitpid(state.pid, &status, 0);
 						HttpResponse response;
 						parseCgiOutput(state.output, response);
-						client_conn->appendResponse(response.toString());
+						queueResponse(client_conn, response);
 						close(current_fd);
 						_poller.removeFd(current_fd);
 						_cgi_states.erase(cgiIt);
@@ -406,8 +423,7 @@ void EventLoop::run()
 					}
 					else
 					{
-					conn->appendResponse(response.toString());
-					_poller.setEvents(current_fd, POLLIN | POLLOUT);
+					queueResponse(conn, response);
 					}
 				}
 					else if (parseState == RequestParser::PARSE_ERROR
@@ -418,8 +434,7 @@ void EventLoop::run()
 					HttpResponse response;
 						ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
 
-					conn->appendResponse(response.toString());
-					_poller.setEvents(current_fd, POLLIN | POLLOUT);
+					queueResponse(conn, response);
 				}
 			}
 		}

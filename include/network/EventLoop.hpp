@@ -39,6 +39,7 @@ class EventLoop
 		const ServerConfig* matchServerConfig(const std::string& hostHeader,
 			const std::string& listeningHost, int listeningPort) const;
         size_t getMaxBodySizeForEndpoint(const std::string& host, int port) const;
+        void queueResponse(Connection* connection, const HttpResponse& response);
         static bool writeAll(int fd, const std::string& data);
         static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response);
 
