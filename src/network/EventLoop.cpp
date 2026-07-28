@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 
 // Set to 0 to stop printing complete HTTP responses during debugging.
-#define WEBSERV_LOG_RESPONSES 1
+#define WEBSERV_LOG_RESPONSES 0
 
 static std::string trimTrailingCrlf(const std::string& line)
 {
