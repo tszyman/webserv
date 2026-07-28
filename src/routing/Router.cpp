@@ -674,7 +674,7 @@ void Router::handlePost(const RequestParser& request, const LocationConfig* loca
 	CgiHandler cgi;
 	if (cgi.init(request, scriptPath, cgiExecutable))
 	{
-		response.setCgi(cgi.getReadFd(), cgi.getPid());
+		response.setCgi(cgi.getReadFd(), cgi.getWriteFd(), cgi.getPid());
 	}
 	else
 	{

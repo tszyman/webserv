@@ -29,9 +29,10 @@ class HttpResponse
         
         static std::string numberToString(unsigned long value);
 
-        void setCgi(int readFd, pid_t pid);
+        void setCgi(int readFd, int writeFd, pid_t pid);
         bool isCgi() const;
         int getCgiReadFd() const;
+        int getCgiWriteFd() const;
         pid_t getCgiPid() const;
         private:
             int _statusCode;
@@ -41,6 +42,7 @@ class HttpResponse
             bool _suppressBody;
             bool _is_cgi;
             int _cgi_read_fd;
+            int _cgi_write_fd;
             pid_t _cgi_pid;
 };
 

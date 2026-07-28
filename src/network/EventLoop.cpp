@@ -3,6 +3,81 @@
 #include "utils/StringUtils.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpResponse.hpp"
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/wait.h>
+
+static std::string trimTrailingCrlf(const std::string& line)
+{
+	std::string result = line;
+	if (!result.empty() && result[result.size() - 1] == '\r')
+		result.erase(result.size() - 1);
+	return result;
+}
+
+bool EventLoop::parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
+{
+	std::string::size_type separator = rawOutput.find("\r\n\r\n");
+	std::string::size_type separatorLength = 4;
+	if (separator == std::string::npos)
+	{
+		separator = rawOutput.find("\n\n");
+		separatorLength = 2;
+	}
+
+	std::string headerBlock;
+	std::string body;
+	if (separator == std::string::npos)
+		body = rawOutput;
+	else
+	{
+		headerBlock = rawOutput.substr(0, separator);
+		body = rawOutput.substr(separator + separatorLength);
+	}
+
+	int statusCode = 200;
+	bool hasContentType = false;
+	std::string::size_type lineStart = 0;
+	while (lineStart < headerBlock.size())
+	{
+		std::string::size_type lineEnd = headerBlock.find('\n', lineStart);
+		std::string line;
+		if (lineEnd == std::string::npos)
+			line = headerBlock.substr(lineStart);
+		else
+			line = headerBlock.substr(lineStart, lineEnd - lineStart);
+		line = trimTrailingCrlf(line);
+		if (!line.empty())
+		{
+			std::string::size_type colon = line.find(':');
+			if (colon != std::string::npos)
+			{
+				std::string key = line.substr(0, colon);
+				std::string value = line.substr(colon + 1);
+				while (!value.empty() && (value[0] == ' ' || value[0] == '\t'))
+					value.erase(0, 1);
+				if (key == "Status")
+					statusCode = std::atoi(value.c_str());
+				else if (key == "Content-Type")
+				{
+					response.setHeader("Content-Type", value);
+					hasContentType = true;
+				}
+				else
+					response.setHeader(key, value);
+			}
+		}
+		if (lineEnd == std::string::npos)
+			break;
+		lineStart = lineEnd + 1;
+	}
+
+	response.setStatusCode(statusCode);
+	response.setBody(body);
+	if (!hasContentType)
+		response.setHeader("Content-Type", "text/plain");
+	return true;
+}
 
 bool EventLoop::is_running = true;
 
@@ -124,6 +199,8 @@ void EventLoop::run()
 	{
 		int current_fd = fds[i].fd;
 		short revents = fds[i].revents;
+		bool is_cgi_read_fd = _cgi_states.find(current_fd) != _cgi_states.end();
+		bool is_cgi_write_fd = _cgi_write_to_read.find(current_fd) != _cgi_write_to_read.end();
 
 		bool is_server_socket = false;
 		SocketEngine* active_engine = NULL;
@@ -139,7 +216,8 @@ void EventLoop::run()
 		}
 
 		// 1. IO Multiplexing Safeguard: Detect errors and broken connections
-		if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		if ((revents & (POLLERR | POLLNVAL | POLLHUP))
+			&& !is_cgi_read_fd && !is_cgi_write_fd)
 		{
 			Logger::warning(std::string("Socket error/hangup detected on FD: ") +StringUtils::to_string(current_fd));
 		
@@ -154,7 +232,7 @@ void EventLoop::run()
 			continue; // skip to next FD
 		}
 		// 2. Main read handling with POLLIN
-		if (revents & POLLIN)
+		if ((revents & POLLIN) || (is_cgi_read_fd && (revents & POLLHUP)))
 		{
 			if (is_server_socket)
 			{
@@ -169,22 +247,73 @@ void EventLoop::run()
 					Logger::info(std::string("Accepted and monitoring new client FD: ") + StringUtils::to_string(client_fd));
 				}
 			}
-			else if (_cgi_connections.find(current_fd) != _cgi_connections.end())
+			else if (_cgi_states.find(current_fd) != _cgi_states.end())
 			{
-				char cgi_buffer[4096];
-				ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
-				Connection* client_conn = _cgi_connections[current_fd];
-				if (bytes_read > 0)
+				std::map<int, CgiState>::iterator cgiIt = _cgi_states.find(current_fd);
+				if (cgiIt != _cgi_states.end())
 				{
-					client_conn->appendResponse(std::string(cgi_buffer, bytes_read));
-				}
-				else
-				{
-					Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
-					close(current_fd);
-					_poller.removeFd(current_fd);
-					_cgi_connections.erase(current_fd);
-					_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+					CgiState& state = cgiIt->second;
+					char cgi_buffer[4096];
+					bool eof = false;
+					while (true)
+					{
+						ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
+						if (bytes_read > 0)
+						{
+							state.output.append(cgi_buffer, bytes_read);
+							continue;
+						}
+						if (bytes_read == 0)
+						{
+							eof = true;
+							break;
+						}
+						if (errno == EAGAIN || errno == EWOULDBLOCK)
+							break;
+
+						Logger::warning("CGI stdout read failed on FD: " + StringUtils::to_string(current_fd));
+						Connection* client_conn = state.client;
+						HttpResponse errorResponse;
+						ErrorPage::tryBuildDefault(500, errorResponse);
+						client_conn->appendResponse(errorResponse.toString());
+						if (!state.requestBodyClosed)
+						{
+							close(state.writeFd);
+							_poller.removeFd(state.writeFd);
+							_cgi_write_to_read.erase(state.writeFd);
+							state.requestBodyClosed = true;
+						}
+						close(current_fd);
+						_poller.removeFd(current_fd);
+						_cgi_states.erase(cgiIt);
+						if (_connections.find(client_conn->getFd()) != _connections.end())
+							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+						eof = false;
+						break;
+					}
+
+					if (eof)
+					{
+						Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
+						Connection* client_conn = state.client;
+						if (!state.requestBodyClosed)
+						{
+							close(state.writeFd);
+							_poller.removeFd(state.writeFd);
+							_cgi_write_to_read.erase(state.writeFd);
+							state.requestBodyClosed = true;
+						}
+						int status = 0;
+						waitpid(state.pid, &status, 0);
+						HttpResponse response;
+						parseCgiOutput(state.output, response);
+						client_conn->appendResponse(response.toString());
+						close(current_fd);
+						_poller.removeFd(current_fd);
+						_cgi_states.erase(cgiIt);
+						if (_connections.find(client_conn->getFd()) != _connections.end())
+							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+					}
 				}
 			}
 		// B: Event on a client socket (Incoming data).
@@ -253,8 +382,26 @@ void EventLoop::run()
 					if (response.isCgi())
 					{
 						int cgi_fd = response.getCgiReadFd();
+						int cgi_write_fd = response.getCgiWriteFd();
 						_poller.addFd(cgi_fd, POLLIN);
-						_cgi_connections[cgi_fd] = conn;
+						_poller.addFd(cgi_write_fd, POLLOUT);
+						CgiState cgi_state;
+						cgi_state.client = conn;
+						cgi_state.pid = response.getCgiPid();
+						cgi_state.readFd = cgi_fd;
+						cgi_state.writeFd = cgi_write_fd;
+						cgi_state.requestBody = std::string(conn->getParser().getBody().begin(), conn->getParser().getBody().end());
+						cgi_state.requestBodyOffset = 0;
+						cgi_state.requestBodyClosed = false;
+						_cgi_states[cgi_fd] = cgi_state;
+						_cgi_write_to_read[cgi_write_fd] = cgi_fd;
+						if (cgi_state.requestBody.empty())
+						{
+							close(cgi_write_fd);
+							_poller.removeFd(cgi_write_fd);
+							_cgi_write_to_read.erase(cgi_write_fd);
+							_cgi_states[cgi_fd].requestBodyClosed = true;
+						}
 						Logger::info("Waiting for CGI output on FD: " + StringUtils::to_string(cgi_fd));
 					}
 					else
@@ -280,7 +427,41 @@ void EventLoop::run()
 
 	if (revents & POLLOUT)
 	{
-		if(_connections.find(current_fd) != _connections.end())
+		if (_cgi_write_to_read.find(current_fd) != _cgi_write_to_read.end())
+		{
+			int read_fd = _cgi_write_to_read[current_fd];
+			std::map<int, CgiState>::iterator cgiIt = _cgi_states.find(read_fd);
+			if (cgiIt != _cgi_states.end())
+			{
+				CgiState& state = cgiIt->second;
+				if (!state.requestBodyClosed && state.requestBodyOffset < state.requestBody.size())
+				{
+					ssize_t written = write(current_fd, state.requestBody.data() + state.requestBodyOffset,
+						state.requestBody.size() - state.requestBodyOffset);
+					if (written > 0)
+						state.requestBodyOffset += static_cast<size_t>(written);
+					else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+					{
+						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
+						close(current_fd);
+						_poller.removeFd(current_fd);
+						close(state.readFd);
+						_poller.removeFd(state.readFd);
+						_cgi_write_to_read.erase(current_fd);
+						_cgi_states.erase(cgiIt);
+						continue;
+					}
+				}
+				if (state.requestBodyOffset >= state.requestBody.size() && !state.requestBodyClosed)
+				{
+					close(current_fd);
+					_poller.removeFd(current_fd);
+					_cgi_write_to_read.erase(current_fd);
+					state.requestBodyClosed = true;
+				}
+			}
+		}
+		else if(_connections.find(current_fd) != _connections.end())
 		{
 			Connection* conn = _connections[current_fd];
 			std::string& response = conn->getResponseBuffer();
