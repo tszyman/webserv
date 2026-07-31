@@ -3,11 +3,14 @@
 #include "utils/StringUtils.hpp"
 #include "http/HttpErrorPage.hpp"
 #include "http/HttpResponse.hpp"
+#include "http/StatusCodes.hpp"
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sstream>
 
-// Set to 0 to stop printing complete HTTP responses during debugging.
+// Set to 1 temporarily when inspecting individual requests.  Leave this off
+// for stress tests: they deliberately generate tens of thousands of replies.
 #define WEBSERV_LOG_RESPONSES 0
 
 static std::string trimTrailingCrlf(const std::string& line)
@@ -16,6 +19,73 @@ static std::string trimTrailingCrlf(const std::string& line)
 	if (!result.empty() && result[result.size() - 1] == '\r')
 		result.erase(result.size() - 1);
 	return result;
+}
+
+static bool findCgiHeaderEnd(const std::string& data, size_t& headerEnd)
+{
+	std::string::size_type separator = data.find("\r\n\r\n");
+	if (separator != std::string::npos)
+	{
+		headerEnd = separator + 4;
+		return true;
+	}
+	separator = data.find("\n\n");
+	if (separator == std::string::npos)
+		return false;
+	headerEnd = separator + 2;
+	return true;
+}
+
+static std::string buildChunkedCgiHead(const std::string& headerBlock)
+{
+	int statusCode = 200;
+	bool hasContentType = false;
+	std::string headers;
+	std::string::size_type start = 0;
+	while (start < headerBlock.size())
+	{
+		std::string::size_type end = headerBlock.find('\n', start);
+		std::string line = headerBlock.substr(start, end == std::string::npos ? std::string::npos : end - start);
+		line = trimTrailingCrlf(line);
+		std::string::size_type colon = line.find(':');
+		if (colon != std::string::npos)
+		{
+			std::string key = line.substr(0, colon);
+			std::string value = line.substr(colon + 1);
+			while (!value.empty() && (value[0] == ' ' || value[0] == '\t'))
+				value.erase(0, 1);
+			if (key == "Status")
+				statusCode = std::atoi(value.c_str());
+			else if (key == "Content-Length" || key == "Transfer-Encoding" || key == "Connection")
+			{
+			}
+			else
+			{
+				if (key == "Content-Type")
+					hasContentType = true;
+				headers += key + ": " + value + "\r\n";
+			}
+		}
+		if (end == std::string::npos)
+			break;
+		start = end + 1;
+	}
+	if (!hasContentType)
+		headers += "Content-Type: text/plain\r\n";
+	std::ostringstream response;
+	response << "HTTP/1.1 " << statusCode << " " << HttpStatus::reasonPhrase(statusCode) << "\r\n";
+	response << headers << "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+	return response.str();
+}
+
+static std::string makeChunk(const char* data, size_t length)
+{
+	std::ostringstream stream;
+	stream << std::hex << length << "\r\n";
+	std::string chunk = stream.str();
+	chunk.append(data, length);
+	chunk += "\r\n";
+	return chunk;
 }
 
 bool EventLoop::parseCgiOutput(const std::string& rawOutput, HttpResponse& response)
@@ -161,13 +231,63 @@ void EventLoop::queueResponse(Connection* connection, const HttpResponse& respon
 	const std::string rawResponse = response.toString();
 
 #if WEBSERV_LOG_RESPONSES
+	const size_t logPreviewLimit = 4096;
+	std::string responsePreview = rawResponse.substr(0, logPreviewLimit);
+	if (rawResponse.size() > logPreviewLimit)
+	{
+		responsePreview += "\n----- response body preview truncated; total response size: "
+			+ StringUtils::to_string(rawResponse.size()) + " bytes -----";
+	}
 	Logger::debug("----- HTTP response for FD "
 		+ StringUtils::to_string(connection->getFd())
-		+ " -----\n" + rawResponse + "\n----- end HTTP response -----");
+		+ " -----\n" + responsePreview + "\n----- end HTTP response -----");
 #endif
 
 	connection->appendResponse(rawResponse);
-	_poller.setEvents(connection->getFd(), POLLIN | POLLOUT);
+	// A connection owns exactly one request at a time.  Once its response is
+	// queued, leave subsequent bytes in the kernel buffer until this response
+	// has been completely sent and the parser is reset.  Otherwise a persistent
+	// client can feed its next request into a parser that is still in SUCCESS,
+	// which turns it into a spurious 400 or appends responses out of order.
+	if (connection->isDrainingAfterError())
+		_poller.setEvents(connection->getFd(), POLLIN | POLLOUT);
+	else
+		_poller.setEvents(connection->getFd(), POLLOUT);
+}
+
+bool EventLoop::hasActiveCgi(Connection* connection) const
+{
+	for (std::map<int, CgiState>::const_iterator it = _cgi_states.begin();
+		it != _cgi_states.end(); ++it)
+	{
+		if (it->second.client == connection)
+			return true;
+	}
+	return false;
+}
+
+void EventLoop::cancelCgi(Connection* connection)
+{
+	for (std::map<int, CgiState>::iterator it = _cgi_states.begin();
+		it != _cgi_states.end(); )
+	{
+		if (it->second.client != connection)
+		{
+			++it;
+			continue;
+		}
+		const int readFd = it->second.readFd;
+		const int writeFd = it->second.writeFd;
+		kill(it->second.pid, SIGTERM);
+		close(readFd);
+		_poller.removeFd(readFd);
+		if (!it->second.requestBodyClosed)
+			close(writeFd);
+		_poller.removeFd(writeFd);
+		_cgi_write_to_read.erase(writeFd);
+		std::map<int, CgiState>::iterator toErase = it++;
+		_cgi_states.erase(toErase);
+	}
 }
 
 void EventLoop::run()
@@ -184,6 +304,7 @@ void EventLoop::run()
 			{
 				int timeout_fd = it->first;
 				Logger::warning("Connection timed out. Closing FD " + StringUtils::to_string(timeout_fd));
+				cancelCgi(it->second);
 				close(timeout_fd);
 				_poller.removeFd(timeout_fd);
 				delete it->second;
@@ -241,6 +362,7 @@ void EventLoop::run()
 			// If new client socket, clean up memory
 			if (!is_server_socket)
 			{
+				cancelCgi(_connections[current_fd]);
 				delete _connections[current_fd];
 				_connections.erase(current_fd);
 			}
@@ -277,7 +399,14 @@ void EventLoop::run()
 						ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
 						if (bytes_read > 0)
 						{
-							state.output.append(cgi_buffer, bytes_read);
+							if (state.responseHeadersSent)
+							{
+								state.client->appendResponse(makeChunk(cgi_buffer,
+									static_cast<size_t>(bytes_read)));
+								_poller.setEvents(state.client->getFd(), POLLOUT);
+							}
+							else
+								state.output.append(cgi_buffer, bytes_read);
 							continue;
 						}
 						if (bytes_read == 0)
@@ -309,6 +438,21 @@ void EventLoop::run()
 						break;
 					}
 
+					if (!state.responseHeadersSent)
+					{
+						size_t headerEnd = 0;
+						if (findCgiHeaderEnd(state.output, headerEnd))
+						{
+							state.client->appendResponse(buildChunkedCgiHead(state.output.substr(0, headerEnd)));
+							state.responseHeadersSent = true;
+							if (state.output.size() > headerEnd)
+								state.client->appendResponse(makeChunk(state.output.data() + headerEnd,
+									state.output.size() - headerEnd));
+							state.output.clear();
+							_poller.setEvents(state.client->getFd(), POLLOUT);
+						}
+					}
+
 					if (eof)
 					{
 						Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
@@ -322,9 +466,17 @@ void EventLoop::run()
 						}
 						int status = 0;
 						waitpid(state.pid, &status, 0);
-						HttpResponse response;
-						parseCgiOutput(state.output, response);
-						queueResponse(client_conn, response);
+						if (state.responseHeadersSent)
+						{
+							client_conn->appendResponse("0\r\n\r\n");
+							_poller.setEvents(client_conn->getFd(), POLLOUT);
+						}
+						else
+						{
+							HttpResponse response;
+							parseCgiOutput(state.output, response);
+							queueResponse(client_conn, response);
+						}
 						close(current_fd);
 						_poller.removeFd(current_fd);
 						_cgi_states.erase(cgiIt);
@@ -336,14 +488,21 @@ void EventLoop::run()
 		// B: Event on a client socket (Incoming data).
 		else
 		{
-			char buffer[1024];
-			ssize_t bytes_read = recv(current_fd, buffer, sizeof(buffer) - 1, 0);
+			// Request parsing is length-based, so a terminating NUL is not needed.
+			// A 1 KiB receive buffer made the tester's 100 MiB CGI upload require
+			// about 100,000 poll/recv iterations and hit its timeout before CGI
+			// could respond.
+			char buffer[65536];
+			ssize_t bytes_read = recv(current_fd, buffer, sizeof(buffer), 0);
+			Connection* conn = _connections[current_fd];
 
 			// Graceful disconnection
 			if (bytes_read == 0)
 			{
 				Logger::info(std::string("Client gracefully disconnected on FD: ") + StringUtils::to_string(current_fd));
-				delete _connections[current_fd];
+				Connection* closingConnection = _connections[current_fd];
+				cancelCgi(closingConnection);
+				delete closingConnection;
 				_connections.erase(current_fd);
 				_poller.removeFd(current_fd);
 			}
@@ -351,16 +510,94 @@ void EventLoop::run()
 			else if (bytes_read < 0)
 			{
 				Logger::warning(std::string("recv() error on FD: ") + StringUtils::to_string(current_fd));
-				delete _connections[current_fd];
+				Connection* closingConnection = _connections[current_fd];
+				cancelCgi(closingConnection);
+				delete closingConnection;
 				_connections.erase(current_fd);
 				_poller.removeFd(current_fd);
 			}
 			// Successful data read
 			else
 			{
-				Connection* conn = _connections[current_fd];
 				conn->updateLastActivity();
-				conn->getParser().feed(buffer, bytes_read);
+				// A malformed request can still have bytes in flight.  Do not feed
+				// them back into the parser after responding; discard them until the
+				// client observes Connection: close and closes its side.
+				if (conn->isDrainingAfterError())
+					continue;
+				RequestParser& parser = conn->getParser();
+				const size_t headerBytes = parser.feedHeaders(buffer,
+					static_cast<size_t>(bytes_read));
+
+				// For Content-Length CGI POSTs, create CGI immediately after the
+				// headers.  Body bytes are kept only until the non-blocking CGI pipe
+				// accepts them, instead of first storing the entire request in the
+				// RequestParser.
+				if (!hasActiveCgi(conn) && parser.headersComplete()
+					&& parser.hasContentLengthBody() && !parser.isBodyComplete())
+				{
+					const std::map<std::string, std::string>& earlyHeaders = parser.getHeaders();
+					std::string earlyHost;
+					std::map<std::string, std::string>::const_iterator hostIt = earlyHeaders.find("host");
+					if (hostIt != earlyHeaders.end())
+						earlyHost = hostIt->second;
+					const ServerConfig* earlyConfig = matchServerConfig(earlyHost,
+						conn->getListeningHost(), conn->getListeningPort());
+					if (earlyConfig != NULL)
+					{
+						Router earlyRouter;
+						for (size_t locationIndex = 0; locationIndex < earlyConfig->locations.size(); ++locationIndex)
+							earlyRouter.addLocation(earlyConfig->locations[locationIndex]);
+						if (earlyRouter.isCgiRequest(parser))
+						{
+							HttpResponse cgiResponse;
+							earlyRouter.route(parser, cgiResponse);
+							if (cgiResponse.isCgi())
+							{
+								const int cgiFd = cgiResponse.getCgiReadFd();
+								const int cgiWriteFd = cgiResponse.getCgiWriteFd();
+								_poller.addFd(cgiFd, POLLIN);
+								_poller.addFd(cgiWriteFd, POLLOUT);
+								CgiState cgiState;
+								cgiState.client = conn;
+								cgiState.pid = cgiResponse.getCgiPid();
+								cgiState.readFd = cgiFd;
+								cgiState.writeFd = cgiWriteFd;
+								cgiState.requestBody.clear();
+								cgiState.requestBodyOffset = 0;
+								cgiState.requestBodyClosed = false;
+								cgiState.requestBodyComplete = false;
+								cgiState.responseHeadersSent = false;
+								_cgi_states[cgiFd] = cgiState;
+								_cgi_write_to_read[cgiWriteFd] = cgiFd;
+								conn->closeAfterResponse();
+								_poller.setEvents(conn->getFd(), POLLIN);
+							}
+						}
+					}
+				}
+
+				if (hasActiveCgi(conn))
+				{
+					for (std::map<int, CgiState>::iterator active = _cgi_states.begin();
+						active != _cgi_states.end(); ++active)
+					{
+						if (active->second.client != conn)
+							continue;
+						const size_t bodyBytes = static_cast<size_t>(bytes_read) - headerBytes;
+						if (bodyBytes > 0)
+						{
+							active->second.requestBody.append(buffer + headerBytes, bodyBytes);
+							parser.consumeStreamingBody(buffer + headerBytes, bodyBytes);
+						}
+						active->second.requestBodyComplete = parser.isBodyComplete();
+						break;
+					}
+					continue;
+				}
+
+				parser.feedBody(buffer + headerBytes,
+					static_cast<size_t>(bytes_read) - headerBytes);
 				RequestParser::ParseState parseState = conn->getParser().getParseState();
 				RequestParser::ParserState state = conn->getParser().getState();
 
@@ -410,8 +647,15 @@ void EventLoop::run()
 						cgi_state.requestBody = std::string(conn->getParser().getBody().begin(), conn->getParser().getBody().end());
 						cgi_state.requestBodyOffset = 0;
 						cgi_state.requestBodyClosed = false;
+						cgi_state.requestBodyComplete = true;
+						cgi_state.responseHeadersSent = false;
 						_cgi_states[cgi_fd] = cgi_state;
 						_cgi_write_to_read[cgi_write_fd] = cgi_fd;
+						conn->closeAfterResponse();
+						// CGI execution is asynchronous, but its client request is
+						// still in progress.  Do not parse a second request on this
+						// socket until the CGI response has been sent.
+						_poller.setEvents(conn->getFd(), 0);
 						if (cgi_state.requestBody.empty())
 						{
 							close(cgi_write_fd);
@@ -432,7 +676,13 @@ void EventLoop::run()
 					Logger::warning("Request parsing error on FD: " + StringUtils::to_string(current_fd));
 
 					HttpResponse response;
-						ErrorPage::tryBuildDefault(state == RequestParser::STATE_PAYLOAD_TOO_LARGE ? 413 : 400, response);
+					const bool oversized = state == RequestParser::STATE_PAYLOAD_TOO_LARGE;
+					ErrorPage::tryBuildDefault(oversized ? 413 : 400, response);
+					// For a generic parse error the parser cannot know whether all
+					// client bytes have arrived.  Keeping the connection open long
+					// enough to discard them avoids a TCP RST while a client is writing.
+					if (!oversized)
+						conn->startErrorDrain();
 
 					queueResponse(conn, response);
 				}
@@ -449,12 +699,11 @@ void EventLoop::run()
 			if (cgiIt != _cgi_states.end())
 			{
 				CgiState& state = cgiIt->second;
-				if (!state.requestBodyClosed && state.requestBodyOffset < state.requestBody.size())
+				if (!state.requestBodyClosed && !state.requestBody.empty())
 				{
-					ssize_t written = write(current_fd, state.requestBody.data() + state.requestBodyOffset,
-						state.requestBody.size() - state.requestBodyOffset);
+					ssize_t written = write(current_fd, state.requestBody.data(), state.requestBody.size());
 					if (written > 0)
-						state.requestBodyOffset += static_cast<size_t>(written);
+						state.requestBody.erase(0, static_cast<size_t>(written));
 					else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 					{
 						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
@@ -467,7 +716,7 @@ void EventLoop::run()
 						continue;
 					}
 				}
-				if (state.requestBodyOffset >= state.requestBody.size() && !state.requestBodyClosed)
+				if (state.requestBodyComplete && state.requestBody.empty() && !state.requestBodyClosed)
 				{
 					close(current_fd);
 					_poller.removeFd(current_fd);
@@ -489,6 +738,7 @@ void EventLoop::run()
 				{
 					Logger::debug(std::string("Sent ") + StringUtils::to_string(bytes_sent) + " bytes to FD " + StringUtils::to_string(current_fd));
 					conn->eraseSentData(bytes_sent);
+					conn->updateLastActivity();
 				}
 				else if (bytes_sent < 0)
 				{
@@ -497,11 +747,25 @@ void EventLoop::run()
 
 				if(conn->getResponseBuffer().empty())
 				{
+					// A chunk of a streaming CGI response has been sent, but the
+					// CGI process can still produce more chunks.  Keep the parser
+					// untouched until its terminating chunk has been queued and sent.
+					if (hasActiveCgi(conn))
+					{
+						_poller.setEvents(current_fd, 0);
+						continue;
+					}
+					if (conn->isDrainingAfterError())
+					{
+						_poller.setEvents(current_fd, POLLIN);
+						continue;
+					}
 					const std::map<std::string, std::string>& headers = conn->getParser().getHeaders();
 					// A malformed or oversized request cannot safely be reused as a
 					// persistent connection: parsing may have stopped before all
 					// headers (including Connection) were read.
-					bool keep_alive = conn->getParser().getState() != RequestParser::STATE_ERROR
+					bool keep_alive = !conn->mustCloseAfterResponse()
+						&& conn->getParser().getState() != RequestParser::STATE_ERROR
 						&& conn->getParser().getState() != RequestParser::STATE_PAYLOAD_TOO_LARGE;
 
 					std::map<std::string, std::string>::const_iterator it = headers.find("connection");

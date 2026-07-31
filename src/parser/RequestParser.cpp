@@ -285,13 +285,23 @@ void RequestParser::determineBodyType()
 
 void RequestParser::feed(const char* data, size_t length)
 {
+	size_t consumed = feedHeaders(data, length);
+	if (_state == STATE_BODY && consumed < length)
+		feedBody(data + consumed, length - consumed);
+	else if (_state == STATE_PAYLOAD_TOO_LARGE && consumed < length)
+		drainOversizedBody(data + consumed, length - consumed);
+}
+
+size_t RequestParser::feedHeaders(const char* data, size_t length)
+{
 	if (_state == STATE_ERROR || _state == STATE_COMPLETE)
-		return;
+		return 0;
 	if (_state == STATE_PAYLOAD_TOO_LARGE)
 	{
-		drainOversizedBody(data, length);
-		return;
+		return 0;
 	}
+	if (_state == STATE_BODY)
+		return 0;
 
 	size_t i = 0;
 	while(i < length && _state != STATE_BODY && _state != STATE_ERROR && _state != STATE_COMPLETE && _state != STATE_PAYLOAD_TOO_LARGE)
@@ -299,7 +309,7 @@ void RequestParser::feed(const char* data, size_t length)
 		if (++_headerBytes > 32768)
 		{
 			_state = STATE_ERROR;
-			return;
+			return i;
 		}
 		_headerBuffer += data[i];
 		if(_headerBuffer.size() >= 2 && _headerBuffer.substr(_headerBuffer.size() - 2) == "\r\n")
@@ -309,7 +319,7 @@ void RequestParser::feed(const char* data, size_t length)
 			if (_state == STATE_REQUEST_LINE && line.size() > 8192)
 			{
 				_state = STATE_ERROR;
-				return;
+				return i;
 			}
 
 			if(line.empty())
@@ -330,15 +340,46 @@ void RequestParser::feed(const char* data, size_t length)
 		}
 		i++;
 	}
-	// Process the reminder of the buffer as body data
-	if(_state == STATE_BODY && i < length)
-	{
-		processBody(data + i, length - i);
-	}
-	else if (_state == STATE_PAYLOAD_TOO_LARGE && i < length)
-	{
-		drainOversizedBody(data + i, length - i);
-	}
+	return i;
+}
+
+void RequestParser::feedBody(const char* data, size_t length)
+{
+	if (_state == STATE_BODY)
+		processBody(data, length);
+	else if (_state == STATE_PAYLOAD_TOO_LARGE)
+		drainOversizedBody(data, length);
+}
+
+void RequestParser::consumeStreamingBody(const char* data, size_t length)
+{
+	(void)data;
+	if (_state != STATE_BODY || _bodyType != BODY_CONTENT_LENGTH)
+		return;
+	const size_t consumed = std::min(length, _contentLength - _bytesRead);
+	_bytesRead += consumed;
+	if (_bytesRead == _contentLength)
+		_state = STATE_COMPLETE;
+}
+
+bool RequestParser::headersComplete() const
+{
+	return _state == STATE_BODY || _state == STATE_COMPLETE || _state == STATE_PAYLOAD_TOO_LARGE;
+}
+
+bool RequestParser::hasContentLengthBody() const
+{
+	return _bodyType == BODY_CONTENT_LENGTH;
+}
+
+size_t RequestParser::getContentLength() const
+{
+	return _contentLength;
+}
+
+bool RequestParser::isBodyComplete() const
+{
+	return _state == STATE_COMPLETE;
 }
 
 void RequestParser::drainOversizedBody(const char* data, size_t length)
@@ -360,7 +401,13 @@ void RequestParser::processBody(const char* data, size_t length)
 		size_t bytesToRead = std::min(length, _contentLength - _bytesRead);
 		if (_maxBodySize != 0 && _body.size() + bytesToRead > _maxBodySize)
 		{
+			// The bytes in this recv() belong to the declared body too.  Count
+			// and discard them before switching to the drain state; otherwise a
+			// complete oversized request received in one packet can never reach
+			// isOversizedBodyDrained(), leaving the client without a 413 response.
+			_bytesRead += bytesToRead;
 			_state = STATE_PAYLOAD_TOO_LARGE;
+			_oversizedBodyDrained = (_bytesRead == _contentLength);
 			return;
 		}
 		_body.insert(_body.end(), data, data + bytesToRead);
@@ -398,8 +445,11 @@ void RequestParser::processBody(const char* data, size_t length)
 						}
 						_chunkHexBuffer.clear();
 						_bytesRead = 0;
-						if(_currentChunkSize == 0)
-							_state = STATE_COMPLETE;
+						// The zero-size chunk is followed by one final CRLF.  Do not
+						// mark the request complete before consuming it, otherwise the
+						// two leftover bytes are parsed as a phantom next request.
+						if (_currentChunkSize == 0)
+							_chunkState = CHUNK_CRLF;
 						else
 							_chunkState = CHUNK_DATA;
 					}
@@ -428,7 +478,10 @@ void RequestParser::processBody(const char* data, size_t length)
 				{
 					if(_chunkHexBuffer == "\r\n")
 					{
-						_chunkState = CHUNK_SIZE;
+						if (_currentChunkSize == 0)
+							_state = STATE_COMPLETE;
+						else
+							_chunkState = CHUNK_SIZE;
 						_chunkHexBuffer.clear();
 					}
 					else

@@ -4,7 +4,7 @@
 #include <iostream>
 
 Connection::Connection(int fd, size_t maxBodySize, const std::string& listeningHost, int listeningPort)
-	: _fd(fd), _parser(maxBodySize), _listening_host(listeningHost),
+	: _fd(fd), _parser(maxBodySize), _drain_after_error(false), _close_after_response(false), _listening_host(listeningHost),
 	_listening_port(listeningPort), _max_body_size(maxBodySize)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
@@ -54,7 +54,29 @@ void Connection::reset()
 {
     _parser = RequestParser(_max_body_size);
     _response_buffer.clear();
+	_drain_after_error = false;
+	_close_after_response = false;
     updateLastActivity();
+}
+
+void Connection::startErrorDrain()
+{
+	_drain_after_error = true;
+}
+
+bool Connection::isDrainingAfterError() const
+{
+	return _drain_after_error;
+}
+
+void Connection::closeAfterResponse()
+{
+	_close_after_response = true;
+}
+
+bool Connection::mustCloseAfterResponse() const
+{
+	return _close_after_response;
 }
 
 void Connection::updateLastActivity()

@@ -14,6 +14,7 @@ class Router {
 		void addLocation(const LocationConfig& location);
 
 		void route(const RequestParser& request, HttpResponse& response) const;
+		bool isCgiRequest(const RequestParser& request) const;
 
 	private:
 		std::vector<LocationConfig> _locations;

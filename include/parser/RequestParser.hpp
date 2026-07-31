@@ -33,6 +33,13 @@ class RequestParser
 		RequestParser(size_t maxBodySize);
 		
 		void feed(const char* data, size_t length);				//feed raw data from the socket into the parser
+		size_t feedHeaders(const char* data, size_t length);
+		void feedBody(const char* data, size_t length);
+		void consumeStreamingBody(const char* data, size_t length);
+		bool headersComplete() const;
+		bool hasContentLengthBody() const;
+		size_t getContentLength() const;
+		bool isBodyComplete() const;
 		
 		ParseState getParseState() const;
 		ParserState getState() const;

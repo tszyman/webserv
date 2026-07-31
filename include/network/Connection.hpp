@@ -12,6 +12,8 @@ class Connection // class representing client
         int _fd;
         std::string _response_buffer;
         RequestParser _parser;
+		bool _drain_after_error;
+		bool _close_after_response;
 		std::string _listening_host;
 		int _listening_port;
         time_t _last_activity;
@@ -37,6 +39,10 @@ class Connection // class representing client
         void reset();
         void updateLastActivity();
         bool isTimedOut(int timeout_second) const;
+		void startErrorDrain();
+		bool isDrainingAfterError() const;
+		void closeAfterResponse();
+		bool mustCloseAfterResponse() const;
 };
 
 #endif
