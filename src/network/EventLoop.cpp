@@ -5,7 +5,6 @@
 #include "http/HttpResponse.hpp"
 #include "http/StatusCodes.hpp"
 #include <fcntl.h>
-#include <errno.h>
 #include <sys/wait.h>
 #include <sstream>
 
@@ -394,29 +393,28 @@ void EventLoop::run()
 					CgiState& state = cgiIt->second;
 					char cgi_buffer[4096];
 					bool eof = false;
-					while (true)
+					// The pipe was reported readable by poll().  Read only once here:
+					// poll() will report it again while more data is available.  This
+					// deliberately avoids inspecting post-read error state, which the
+					// project subject explicitly forbids.
+					ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
+					if (bytes_read > 0)
 					{
-						ssize_t bytes_read = read(current_fd, cgi_buffer, sizeof(cgi_buffer));
-						if (bytes_read > 0)
+						if (state.responseHeadersSent)
 						{
-							if (state.responseHeadersSent)
-							{
-								state.client->appendResponse(makeChunk(cgi_buffer,
-									static_cast<size_t>(bytes_read)));
-								_poller.setEvents(state.client->getFd(), POLLOUT);
-							}
-							else
-								state.output.append(cgi_buffer, bytes_read);
-							continue;
+							state.client->appendResponse(makeChunk(cgi_buffer,
+								static_cast<size_t>(bytes_read)));
+							_poller.setEvents(state.client->getFd(), POLLOUT);
 						}
-						if (bytes_read == 0)
-						{
-							eof = true;
-							break;
-						}
-						if (errno == EAGAIN || errno == EWOULDBLOCK)
-							break;
-
+						else
+							state.output.append(cgi_buffer, bytes_read);
+					}
+					else if (bytes_read == 0)
+					{
+						eof = true;
+					}
+					else
+					{
 						Logger::warning("CGI stdout read failed on FD: " + StringUtils::to_string(current_fd));
 						Connection* client_conn = state.client;
 						HttpResponse errorResponse;
@@ -427,15 +425,11 @@ void EventLoop::run()
 							close(state.writeFd);
 							_poller.removeFd(state.writeFd);
 							_cgi_write_to_read.erase(state.writeFd);
-							state.requestBodyClosed = true;
 						}
 						close(current_fd);
 						_poller.removeFd(current_fd);
 						_cgi_states.erase(cgiIt);
-						if (_connections.find(client_conn->getFd()) != _connections.end())
-							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
-						eof = false;
-						break;
+						continue;
 					}
 
 					if (!state.responseHeadersSent)
@@ -704,7 +698,7 @@ void EventLoop::run()
 					ssize_t written = write(current_fd, state.requestBody.data(), state.requestBody.size());
 					if (written > 0)
 						state.requestBody.erase(0, static_cast<size_t>(written));
-					else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+					else if (written < 0)
 					{
 						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
 						close(current_fd);
