@@ -278,14 +278,71 @@ void EventLoop::cancelCgi(Connection* connection)
 		const int readFd = it->second.readFd;
 		const int writeFd = it->second.writeFd;
 		kill(it->second.pid, SIGTERM);
-		close(readFd);
-		_poller.removeFd(readFd);
+		if (readFd != -1)
+		{
+			close(readFd);
+			_poller.removeFd(readFd);
+		}
 		if (!it->second.requestBodyClosed)
 			close(writeFd);
 		_poller.removeFd(writeFd);
 		_cgi_write_to_read.erase(writeFd);
 		std::map<int, CgiState>::iterator toErase = it++;
 		_cgi_states.erase(toErase);
+	}
+}
+
+void EventLoop::reapFinishedCgis()
+{
+	for (std::map<int, CgiState>::iterator it = _cgi_states.begin();
+		it != _cgi_states.end(); )
+	{
+		CgiState& state = it->second;
+		if (!state.outputClosed)
+		{
+			++it;
+			continue;
+		}
+
+		int status = 0;
+		const pid_t result = waitpid(state.pid, &status, WNOHANG);
+		if (result == 0)
+		{
+			++it;
+			continue;
+		}
+
+		Connection* client_conn = state.client;
+		const int write_fd = state.writeFd;
+		const bool request_body_closed = state.requestBodyClosed;
+		const bool response_headers_sent = state.responseHeadersSent;
+		const std::string output = state.output;
+		std::map<int, CgiState>::iterator to_erase = it++;
+		_cgi_states.erase(to_erase);
+
+		if (!request_body_closed)
+		{
+			close(write_fd);
+			_poller.removeFd(write_fd);
+		}
+		_cgi_write_to_read.erase(write_fd);
+
+		if (_connections.find(client_conn->getFd()) == _connections.end())
+			continue;
+
+		Logger::info("CGI process reaped for client FD: "
+			+ StringUtils::to_string(client_conn->getFd()));
+		if (response_headers_sent)
+		{
+			client_conn->appendResponse("0\r\n\r\n");
+			_poller.setEvents(client_conn->getFd(), POLLOUT);
+		}
+		else
+		{
+			HttpResponse response;
+			parseCgiOutput(output, response);
+			queueResponse(client_conn, response);
+		}
 	}
 }
 
@@ -296,6 +353,8 @@ void EventLoop::run()
 
 	while (EventLoop::is_running)
 	{
+		reapFinishedCgis();
+
 		std::map<int, Connection*>::iterator it = _connections.begin();
 		while (it != _connections.end())
 		{
@@ -449,8 +508,9 @@ void EventLoop::run()
 
 					if (eof)
 					{
-						Logger::info("CGI finished on FD: " + StringUtils::to_string(current_fd));
-						Connection* client_conn = state.client;
+						// EOF only means the CGI closed stdout.  It may still be
+						// running, so never wait for it here.  reapFinishedCgis()
+						// will use waitpid(..., WNOHANG) on a later loop iteration.
 						if (!state.requestBodyClosed)
 						{
 							close(state.writeFd);
@@ -458,24 +518,10 @@ void EventLoop::run()
 							_cgi_write_to_read.erase(state.writeFd);
 							state.requestBodyClosed = true;
 						}
-						int status = 0;
-						waitpid(state.pid, &status, 0);
-						if (state.responseHeadersSent)
-						{
-							client_conn->appendResponse("0\r\n\r\n");
-							_poller.setEvents(client_conn->getFd(), POLLOUT);
-						}
-						else
-						{
-							HttpResponse response;
-							parseCgiOutput(state.output, response);
-							queueResponse(client_conn, response);
-						}
 						close(current_fd);
 						_poller.removeFd(current_fd);
-						_cgi_states.erase(cgiIt);
-						if (_connections.find(client_conn->getFd()) != _connections.end())
-							_poller.setEvents(client_conn->getFd(), POLLIN | POLLOUT);
+						state.readFd = -1;
+						state.outputClosed = true;
 					}
 				}
 			}
@@ -562,6 +608,7 @@ void EventLoop::run()
 								cgiState.requestBodyClosed = false;
 								cgiState.requestBodyComplete = false;
 								cgiState.responseHeadersSent = false;
+								cgiState.outputClosed = false;
 								_cgi_states[cgiFd] = cgiState;
 								_cgi_write_to_read[cgiWriteFd] = cgiFd;
 								conn->closeAfterResponse();
@@ -643,6 +690,7 @@ void EventLoop::run()
 						cgi_state.requestBodyClosed = false;
 						cgi_state.requestBodyComplete = true;
 						cgi_state.responseHeadersSent = false;
+						cgi_state.outputClosed = false;
 						_cgi_states[cgi_fd] = cgi_state;
 						_cgi_write_to_read[cgi_write_fd] = cgi_fd;
 						conn->closeAfterResponse();

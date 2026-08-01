@@ -25,6 +25,7 @@ class EventLoop
             bool requestBodyClosed;
             bool requestBodyComplete;
             bool responseHeadersSent;
+			bool outputClosed;
             std::string output;
         };
 
@@ -44,6 +45,7 @@ class EventLoop
         void queueResponse(Connection* connection, const HttpResponse& response);
         bool hasActiveCgi(Connection* connection) const;
         void cancelCgi(Connection* connection);
+		void reapFinishedCgis();
         static bool writeAll(int fd, const std::string& data);
         static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response);
 
