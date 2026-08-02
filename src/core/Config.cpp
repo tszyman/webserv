@@ -17,6 +17,12 @@ static bool isInteger(const std::string& value)
 	return true;
 }
 
+static bool isConfigWhitespace(char character)
+{
+	return character == ' ' || character == '\t' || character == '\n'
+		|| character == '\r' || character == '\v' || character == '\f';
+}
+
 Config::Config() : _currentTokenIndex(0) {}
 Config::~Config() {}
 
@@ -82,7 +88,7 @@ void Config::tokenize(const std::string& fileContent)
 		}
 		
 		// 2. Break on whitespace
-		if (isspace(c))
+		if (isConfigWhitespace(c))
 		{
 			if (!token.empty())
 			{
