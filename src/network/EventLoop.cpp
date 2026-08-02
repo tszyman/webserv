@@ -350,6 +350,7 @@ void EventLoop::run()
 {
 	Logger::info("Starting the minimal event loop...");
 	const int TIMEOUT_LIMIT = 15;
+	const int CGI_TIMEOUT_LIMIT = 300;
 
 	while (EventLoop::is_running)
 	{
@@ -358,7 +359,12 @@ void EventLoop::run()
 		std::map<int, Connection*>::iterator it = _connections.begin();
 		while (it != _connections.end())
 		{
-			if (it->second->isTimedOut(TIMEOUT_LIMIT))
+			// Large uploads and CGI output can legitimately take longer than an
+			// ordinary idle HTTP connection.  Keep the deadline finite so a CGI
+			// cannot make a request wait indefinitely.
+			const int timeout_limit = hasActiveCgi(it->second)
+				? CGI_TIMEOUT_LIMIT : TIMEOUT_LIMIT;
+			if (it->second->isTimedOut(timeout_limit))
 			{
 				int timeout_fd = it->first;
 				Logger::warning("Connection timed out. Closing FD " + StringUtils::to_string(timeout_fd));
@@ -450,7 +456,9 @@ void EventLoop::run()
 				if (cgiIt != _cgi_states.end())
 				{
 					CgiState& state = cgiIt->second;
-					char cgi_buffer[4096];
+					// A larger chunk greatly reduces poll/send cycles for streamed CGI
+					// output while still performing exactly one readiness-driven read.
+					char cgi_buffer[65536];
 					bool eof = false;
 					// The pipe was reported readable by poll().  Read only once here:
 					// poll() will report it again while more data is available.  This
@@ -628,6 +636,19 @@ void EventLoop::run()
 						const size_t bodyBytes = static_cast<size_t>(bytes_read) - headerBytes;
 						if (bodyBytes > 0)
 						{
+							if (active->second.requestBodyOffset == active->second.requestBody.size())
+							{
+								active->second.requestBody.clear();
+								active->second.requestBodyOffset = 0;
+							}
+							else if (active->second.requestBodyOffset >= 65536
+								&& active->second.requestBodyOffset
+									>= active->second.requestBody.size() / 2)
+							{
+								active->second.requestBody.erase(0,
+									active->second.requestBodyOffset);
+								active->second.requestBodyOffset = 0;
+							}
 							active->second.requestBody.append(buffer + headerBytes, bodyBytes);
 							parser.consumeStreamingBody(buffer + headerBytes, bodyBytes);
 						}
@@ -741,11 +762,21 @@ void EventLoop::run()
 			if (cgiIt != _cgi_states.end())
 			{
 				CgiState& state = cgiIt->second;
-				if (!state.requestBodyClosed && !state.requestBody.empty())
+				if (!state.requestBodyClosed
+					&& state.requestBodyOffset < state.requestBody.size())
 				{
-					ssize_t written = write(current_fd, state.requestBody.data(), state.requestBody.size());
+					ssize_t written = write(current_fd,
+						state.requestBody.data() + state.requestBodyOffset,
+						state.requestBody.size() - state.requestBodyOffset);
 					if (written > 0)
-						state.requestBody.erase(0, static_cast<size_t>(written));
+					{
+						state.requestBodyOffset += static_cast<size_t>(written);
+						if (state.requestBodyOffset == state.requestBody.size())
+						{
+							state.requestBody.clear();
+							state.requestBodyOffset = 0;
+						}
+					}
 					else if (written < 0)
 					{
 						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
@@ -758,7 +789,9 @@ void EventLoop::run()
 						continue;
 					}
 				}
-				if (state.requestBodyComplete && state.requestBody.empty() && !state.requestBodyClosed)
+				if (state.requestBodyComplete
+					&& state.requestBodyOffset == state.requestBody.size()
+					&& !state.requestBodyClosed)
 				{
 					close(current_fd);
 					_poller.removeFd(current_fd);
@@ -770,11 +803,11 @@ void EventLoop::run()
 		else if(_connections.find(current_fd) != _connections.end())
 		{
 			Connection* conn = _connections[current_fd];
-			std::string& response = conn->getResponseBuffer();
 
-			if (!response.empty())
+			if (conn->hasPendingResponse())
 			{
-				ssize_t bytes_sent = send(current_fd, response.c_str(), response.size(), 0);
+				ssize_t bytes_sent = send(current_fd, conn->getResponseData(),
+					conn->getResponseSize(), 0);
 
 				if (bytes_sent > 0)
 				{
@@ -787,7 +820,7 @@ void EventLoop::run()
 					Logger::error(std::string("Send() error on FD: ") + StringUtils::to_string(current_fd));
 				}
 
-				if(conn->getResponseBuffer().empty())
+				if (!conn->hasPendingResponse())
 				{
 					// A chunk of a streaming CGI response has been sent, but the
 					// CGI process can still produce more chunks.  Keep the parser

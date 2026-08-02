@@ -4,7 +4,7 @@
 #include <iostream>
 
 Connection::Connection(int fd, size_t maxBodySize, const std::string& listeningHost, int listeningPort)
-	: _fd(fd), _parser(maxBodySize), _drain_after_error(false), _close_after_response(false), _listening_host(listeningHost),
+	: _fd(fd), _response_offset(0), _parser(maxBodySize), _drain_after_error(false), _close_after_response(false), _listening_host(listeningHost),
 	_listening_port(listeningPort), _max_body_size(maxBodySize)
 {
     Logger::info(std::string("New connection created on FD: ") + StringUtils::to_string(_fd));
@@ -37,23 +37,55 @@ int Connection::getListeningPort() const
 
 void Connection::appendResponse(const std::string& data)
 {
+	// Do not retain an already-sent response.  When only part of a large CGI
+	// response was sent, compact occasionally instead of after every send().
+	// This keeps response consumption amortized O(n), rather than O(n^2).
+	if (_response_offset == _response_buffer.size())
+	{
+		_response_buffer.clear();
+		_response_offset = 0;
+	}
+	else if (_response_offset >= 65536
+		&& _response_offset >= _response_buffer.size() / 2)
+	{
+		_response_buffer.erase(0, _response_offset);
+		_response_offset = 0;
+	}
     _response_buffer += data;
 }
 
-std::string& Connection::getResponseBuffer()
+const char* Connection::getResponseData() const
 {
-    return _response_buffer;
+	return _response_buffer.data() + _response_offset;
+}
+
+size_t Connection::getResponseSize() const
+{
+	return _response_buffer.size() - _response_offset;
+}
+
+bool Connection::hasPendingResponse() const
+{
+	return _response_offset < _response_buffer.size();
 }
 
 void Connection::eraseSentData(size_t bytes)
 {
-    _response_buffer.erase(0, bytes);
+	const size_t remaining = getResponseSize();
+	if (bytes >= remaining)
+	{
+		_response_buffer.clear();
+		_response_offset = 0;
+	}
+	else
+		_response_offset += bytes;
 }
 
 void Connection::reset()
 {
     _parser = RequestParser(_max_body_size);
     _response_buffer.clear();
+	_response_offset = 0;
 	_drain_after_error = false;
 	_close_after_response = false;
     updateLastActivity();
