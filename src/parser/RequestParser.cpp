@@ -218,6 +218,11 @@ const std::vector<char> &RequestParser::getBody() const
 	return _body;
 }
 
+std::vector<char> &RequestParser::getBody()
+{
+	return _body;
+}
+
 bool RequestParser::isOversizedBodyDrained() const
 {
 	return _oversizedBodyDrained;

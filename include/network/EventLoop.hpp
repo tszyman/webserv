@@ -16,11 +16,11 @@ class EventLoop
     private:
         struct CgiState
         {
-            Connection* client;
+            int clientFd;
             pid_t pid;
             int readFd;
             int writeFd;
-            std::string requestBody;
+            std::vector<char> requestBody;
             size_t requestBodyOffset;
             bool requestBodyClosed;
             std::string output;
