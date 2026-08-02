@@ -5,7 +5,7 @@
 #include <cstring>
 // POSIX OS APIs (no C++ equvalent)
 #include <unistd.h> // for pipe, fork, execve, close, dup2
-#include <fcntl.h> // for fcntl, 0_NONBLOCK, FD_CLOEXEC
+#include <fcntl.h> // for fcntl and O_NONBLOCK
 #include <sys/types.h> // for pid_t
 #include <vector>
 
@@ -131,9 +131,9 @@ bool CgiProcess::execute(const std::string& scriptPath, const std::string& cgiEx
 		_serverToCgiFd = pipe_in[1];
 		_cgiToServerFd = pipe_out[0];
 
-		// Ensuring non-blocking mode
-		fcntl(_serverToCgiFd, F_SETFL, O_NONBLOCK, FD_CLOEXEC);
-		fcntl(_cgiToServerFd, F_SETFL, O_NONBLOCK, FD_CLOEXEC);
+		// Ensuring non-blocking mode with the subject-permitted fcntl flags.
+		fcntl(_serverToCgiFd, F_SETFL, O_NONBLOCK);
+		fcntl(_cgiToServerFd, F_SETFL, O_NONBLOCK);
 		
 		return true;
 	}
