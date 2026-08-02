@@ -220,7 +220,7 @@ Logger::info("New client connected on fd " + StringUtils::to_string(client_fd));
 std::vector<SocketEngine*> engines = setupEngines();
 EventLoop loop(engines, config.getServers());
 loop.run(); // Blocks until server shutdown
-
+```
 #### `network/Connection.hpp`
 What it does: Represents a single, persistent client connection. It tracks the clients file descriptor, the dedicated RequestParser to specific client, the response buffer waiting to be sent, and the timestamp of their last activity (for timeout management).
 **Key Interfaces:**
