@@ -1,13 +1,12 @@
-
-*This project has been created as part of the 42 curriculum by Przemek, Bartek, and Tomek.*
+*This project has been created as part of the 42 curriculum by pjedrycz, brogalsk, and tszymans.*
 
 # Project: webserv
 
 ## Team
 
-- Bartek
-- Tomek
-- Przemek
+- Bartek (brogalsk)
+- Tomek (tszymans)
+- Przemek (pjedrycz)
 
 ## Description
 
@@ -230,21 +229,19 @@ What it does: Represents a single, persistent client connection. It tracks the c
     Clears the parser and buffer to handle Keep-Alive connections[cite: 2].
 *   bool isTimedOut(int timeout_seconds) const;
 
-## AI usage
+## Resources
+
+### AI usage
 
 AI assistance was used to review code, discuss HTTP and CGI behavior, identify
 debugging and performance issues, propose implementation approaches, and help
 draft documentation. All generated suggestions were reviewed, adapted, tested,
 and understood by the project team before inclusion.
 
-## Resources
+### Other Resources
 
 - [RFC 9110 — HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110)
 - [RFC 9112 — HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9112)
 - [RFC 3875 — The Common Gateway Interface (CGI)](https://www.rfc-editor.org/rfc/rfc3875)
 - [C++ reference — C++98 language and library reference](https://en.cppreference.com/w/cpp/98)
 - [NGINX documentation](https://nginx.org/en/docs/)
-
-## TODO
-
-[ ] all
