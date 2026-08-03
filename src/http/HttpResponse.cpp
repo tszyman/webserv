@@ -6,7 +6,7 @@
 
 HttpResponse::HttpResponse()
     : _statusCode(200), _headers(), _body(), _closeConnection(false),
-                _suppressBody(false), _is_cgi(false), _cgi_read_fd(-1), _cgi_pid(-1) {}
+                _suppressBody(false), _is_cgi(false), _cgi_read_fd(-1), _cgi_write_fd(-1), _cgi_pid(-1) {}
 
 HttpResponse::HttpResponse(int statusCode, const std::string &body)
     : _statusCode(statusCode), _headers(), _body(body), _closeConnection(false),
