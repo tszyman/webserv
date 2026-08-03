@@ -9,8 +9,9 @@
 #define CYAN	"\033[36m"
 #define GRAY	"\033[90m"
 
-// Initialize static variable (default INFO level)
-Logger::Level Logger::_currentLevel = Logger::DEBUG;
+// Keep stress-test I/O from being dominated by per-send debug output.  Enable
+// DEBUG explicitly when investigating an individual request.
+Logger::Level Logger::_currentLevel = Logger::INFO;
 
 void Logger::setLogLevel(Level level){
 	_currentLevel = level;

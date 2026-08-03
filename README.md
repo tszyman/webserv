@@ -1,15 +1,57 @@
+*This project has been created as part of the 42 curriculum by pjedrycz, brogalsk, and tszymans.*
 
 # Project: webserv
 
 ## Team
 
-- Bartek
-- Tomek
-- Przemek
+- Bartek (brogalsk)
+- Tomek (tszymans)
+- Przemek (pjedrycz)
 
 ## Description
 
+`webserv` is a C++98 HTTP server built as part of the 42 curriculum. It uses
+`poll()` to manage multiple clients and listening sockets without blocking. The
+server serves static files, supports GET, POST, and DELETE, handles uploads,
+directory listing, redirects, custom error pages, and CGI execution configured
+by a NGINX-inspired configuration file.
+
 ## Goals
+
+- Understand HTTP request parsing and response generation.
+- Build a resilient, non-blocking event loop around socket and pipe I/O.
+- Configure several servers and routes from a configuration file.
+- Support static content, uploads, error handling, and CGI processing.
+
+## Instructions
+
+Build the project from the repository root:
+
+```bash
+make
+```
+
+Start the server with the complete example configuration:
+
+```bash
+./webserv config/default.conf
+```
+
+The default configuration starts listeners on ports `8080` and `9000`.
+It also demonstrates redirects, uploads, autoindex, custom error pages, body
+limits, CGI, and multiple routes. Open `http://localhost:8080/` in a browser,
+or use `curl` for a quick request:
+
+```bash
+curl -i http://localhost:8080/
+```
+
+Useful Makefile targets:
+
+- `make` builds the server.
+- `make clean` removes object files.
+- `make fclean` removes object files and the executable.
+- `make re` rebuilds everything.
 
 ## Worksplit
 
@@ -177,7 +219,7 @@ Logger::info("New client connected on fd " + StringUtils::to_string(client_fd));
 std::vector<SocketEngine*> engines = setupEngines();
 EventLoop loop(engines, config.getServers());
 loop.run(); // Blocks until server shutdown
-
+```
 #### `network/Connection.hpp`
 What it does: Represents a single, persistent client connection. It tracks the clients file descriptor, the dedicated RequestParser to specific client, the response buffer waiting to be sent, and the timestamp of their last activity (for timeout management).
 **Key Interfaces:**
@@ -187,8 +229,19 @@ What it does: Represents a single, persistent client connection. It tracks the c
     Clears the parser and buffer to handle Keep-Alive connections[cite: 2].
 *   bool isTimedOut(int timeout_seconds) const;
 
-## AI usage
+## Resources
 
-## TODO
+### AI usage
 
-[ ] all
+AI assistance was used to review code, discuss HTTP and CGI behavior, identify
+debugging and performance issues, propose implementation approaches, and help
+draft documentation. All generated suggestions were reviewed, adapted, tested,
+and understood by the project team before inclusion.
+
+### Other Resources
+
+- [RFC 9110 — HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110)
+- [RFC 9112 — HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9112)
+- [RFC 3875 — The Common Gateway Interface (CGI)](https://www.rfc-editor.org/rfc/rfc3875)
+- [C++ reference — C++98 language and library reference](https://en.cppreference.com/w/cpp/98)
+- [NGINX documentation](https://nginx.org/en/docs/)

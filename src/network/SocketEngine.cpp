@@ -41,8 +41,7 @@ void SocketEngine::init()
 
         int opt = 1;
         if (setsockopt(_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1
-            || fcntl(_server_fd, F_SETFL, O_NONBLOCK) == -1
-            || fcntl(_server_fd, F_SETFD, FD_CLOEXEC) == -1)
+            || fcntl(_server_fd, F_SETFL, O_NONBLOCK) == -1)
         {
             close(_server_fd);
             _server_fd = -1;
@@ -78,7 +77,7 @@ Connection* SocketEngine::acceptConnection(size_t maxBodySize)
         return NULL;
     }
     
-    if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1 || fcntl(client_fd, F_SETFD, FD_CLOEXEC) == -1)
+    if (fcntl(client_fd, F_SETFL, O_NONBLOCK) == -1)
     {
         Logger::error(std::string("fcntl failed for FD ") + StringUtils::to_string(client_fd));
         close(client_fd);
