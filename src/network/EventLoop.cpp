@@ -165,6 +165,12 @@ EventLoop::EventLoop(const std::vector<SocketEngine*>& engines, const std::vecto
 
 EventLoop::~EventLoop()
 {
+	// Connections may still own a running CGI process during shutdown.  Stop
+	// and schedule those children before their Connection objects disappear.
+	while (!_cgi_states.empty())
+		cancelCgi(_cgi_states.begin()->second.client);
+	reapCancelledCgis();
+
 	for(std::map<int, Connection*>::iterator it = _connections.begin(); it != _connections.end(); ++it)
 		delete it->second;
 	_connections.clear(); 
@@ -265,6 +271,30 @@ bool EventLoop::hasActiveCgi(Connection* connection) const
 	return false;
 }
 
+bool EventLoop::hasStartedCgiResponse(Connection* connection) const
+{
+	for (std::map<int, CgiState>::const_iterator it = _cgi_states.begin();
+		it != _cgi_states.end(); ++it)
+	{
+		if (it->second.client == connection)
+			return it->second.responseHeadersSent;
+	}
+	return false;
+}
+
+void EventLoop::scheduleCgiReap(pid_t pid)
+{
+	if (pid <= 0)
+		return;
+	for (std::vector<pid_t>::const_iterator it = _cancelled_cgi_pids.begin();
+		it != _cancelled_cgi_pids.end(); ++it)
+	{
+		if (*it == pid)
+			return;
+	}
+	_cancelled_cgi_pids.push_back(pid);
+}
+
 void EventLoop::cancelCgi(Connection* connection)
 {
 	for (std::map<int, CgiState>::iterator it = _cgi_states.begin();
@@ -278,6 +308,7 @@ void EventLoop::cancelCgi(Connection* connection)
 		const int readFd = it->second.readFd;
 		const int writeFd = it->second.writeFd;
 		kill(it->second.pid, SIGTERM);
+		scheduleCgiReap(it->second.pid);
 		if (readFd != -1)
 		{
 			close(readFd);
@@ -289,6 +320,29 @@ void EventLoop::cancelCgi(Connection* connection)
 		_cgi_write_to_read.erase(writeFd);
 		std::map<int, CgiState>::iterator toErase = it++;
 		_cgi_states.erase(toErase);
+	}
+}
+
+void EventLoop::reapCancelledCgis()
+{
+	for (std::vector<pid_t>::iterator it = _cancelled_cgi_pids.begin();
+		it != _cancelled_cgi_pids.end(); )
+	{
+		int status = 0;
+		const pid_t result = waitpid(*it, &status, WNOHANG);
+		if (result == 0)
+		{
+			++it;
+			continue;
+		}
+
+		// A positive result means the terminated CGI was collected.  A negative
+		// result means it was already collected elsewhere, so retaining its pid
+		// would serve no purpose.  Neither case blocks the event loop.
+		if (result > 0)
+			Logger::info("Cancelled CGI process reaped (PID: "
+				+ StringUtils::to_string(result) + ")");
+		it = _cancelled_cgi_pids.erase(it);
 	}
 }
 
@@ -317,6 +371,8 @@ void EventLoop::reapFinishedCgis()
 		const bool request_body_closed = state.requestBodyClosed;
 		const bool response_headers_sent = state.responseHeadersSent;
 		const std::string output = state.output;
+		const bool cgi_failed = result == -1 || !WIFEXITED(status)
+			|| WEXITSTATUS(status) != 0;
 		std::map<int, CgiState>::iterator to_erase = it++;
 		_cgi_states.erase(to_erase);
 
@@ -332,10 +388,28 @@ void EventLoop::reapFinishedCgis()
 
 		Logger::info("CGI process reaped for client FD: "
 			+ StringUtils::to_string(client_conn->getFd()));
-		if (response_headers_sent)
+		if (response_headers_sent && !cgi_failed)
 		{
 			client_conn->appendResponse("0\r\n\r\n");
 			_poller.setEvents(client_conn->getFd(), POLLOUT);
+		}
+		else if (response_headers_sent)
+		{
+			// The HTTP status and headers have already been streamed, so a
+			// replacement 500 response would corrupt the response framing.
+			// Closing the connection makes the incomplete chunked response visible
+			// to the client without claiming that CGI completed successfully.
+			Logger::warning("CGI failed after starting its response for client FD: "
+				+ StringUtils::to_string(client_conn->getFd()));
+			client_conn->closeAfterResponse();
+		}
+		else if (cgi_failed)
+		{
+			Logger::warning("CGI process failed for client FD: "
+				+ StringUtils::to_string(client_conn->getFd()));
+			HttpResponse errorResponse;
+			ErrorPage::tryBuildDefault(500, errorResponse);
+			queueResponse(client_conn, errorResponse);
 		}
 		else
 		{
@@ -355,6 +429,7 @@ void EventLoop::run()
 	while (EventLoop::is_running)
 	{
 		reapFinishedCgis();
+		reapCancelledCgis();
 
 		std::map<int, Connection*>::iterator it = _connections.begin();
 		while (it != _connections.end())
@@ -367,11 +442,27 @@ void EventLoop::run()
 			if (it->second->isTimedOut(timeout_limit))
 			{
 				int timeout_fd = it->first;
+				Connection* timedOutConnection = it->second;
+				if (hasActiveCgi(timedOutConnection))
+				{
+					const bool responseStarted = hasStartedCgiResponse(timedOutConnection);
+					Logger::warning("CGI timed out on FD " + StringUtils::to_string(timeout_fd));
+					cancelCgi(timedOutConnection);
+					if (!responseStarted)
+					{
+						HttpResponse timeoutResponse;
+						ErrorPage::tryBuildDefault(504, timeoutResponse);
+						timedOutConnection->closeAfterResponse();
+						timedOutConnection->updateLastActivity();
+						queueResponse(timedOutConnection, timeoutResponse);
+						++it;
+						continue;
+					}
+				}
 				Logger::warning("Connection timed out. Closing FD " + StringUtils::to_string(timeout_fd));
-				cancelCgi(it->second);
 				close(timeout_fd);
 				_poller.removeFd(timeout_fd);
-				delete it->second;
+				delete timedOutConnection;
 				_connections.erase(it++);
 			}
 			else
@@ -484,18 +575,24 @@ void EventLoop::run()
 					{
 						Logger::warning("CGI stdout read failed on FD: " + StringUtils::to_string(current_fd));
 						Connection* client_conn = state.client;
-						HttpResponse errorResponse;
-						ErrorPage::tryBuildDefault(500, errorResponse);
-						queueResponse(client_conn, errorResponse);
-						if (!state.requestBodyClosed)
+						const bool response_started = state.responseHeadersSent;
+						// Do not erase this CGI state directly: cancelCgi() terminates
+						// the child and records its PID for waitpid(..., WNOHANG).
+						cancelCgi(client_conn);
+						if (response_started)
 						{
-							close(state.writeFd);
-							_poller.removeFd(state.writeFd);
-							_cgi_write_to_read.erase(state.writeFd);
+							// A second response would corrupt already-streamed headers.
+							const int client_fd = client_conn->getFd();
+							_poller.removeFd(client_fd);
+							delete client_conn;
+							_connections.erase(client_fd);
 						}
-						close(current_fd);
-						_poller.removeFd(current_fd);
-						_cgi_states.erase(cgiIt);
+						else
+						{
+							HttpResponse errorResponse;
+							ErrorPage::tryBuildDefault(500, errorResponse);
+							queueResponse(client_conn, errorResponse);
+						}
 						continue;
 					}
 
@@ -777,15 +874,28 @@ void EventLoop::run()
 							state.requestBodyOffset = 0;
 						}
 					}
-					else if (written < 0)
+					else
 					{
-						Logger::warning("CGI stdin write failed on FD: " + StringUtils::to_string(current_fd));
-						close(current_fd);
-						_poller.removeFd(current_fd);
-						close(state.readFd);
-						_poller.removeFd(state.readFd);
-						_cgi_write_to_read.erase(current_fd);
-						_cgi_states.erase(cgiIt);
+						Logger::warning("CGI stdin write returned a non-positive value on FD: "
+							+ StringUtils::to_string(current_fd));
+						Connection* client_conn = state.client;
+						const bool response_started = state.responseHeadersSent;
+						// As with CGI stdout errors, use the common cancellation path so
+						// the child is killed and subsequently reaped without blocking.
+						cancelCgi(client_conn);
+						if (response_started)
+						{
+							const int client_fd = client_conn->getFd();
+							_poller.removeFd(client_fd);
+							delete client_conn;
+							_connections.erase(client_fd);
+						}
+						else
+						{
+							HttpResponse errorResponse;
+							ErrorPage::tryBuildDefault(500, errorResponse);
+							queueResponse(client_conn, errorResponse);
+						}
 						continue;
 					}
 				}
@@ -815,9 +925,20 @@ void EventLoop::run()
 					conn->eraseSentData(bytes_sent);
 					conn->updateLastActivity();
 				}
-				else if (bytes_sent < 0)
+				else
 				{
-					Logger::error(std::string("Send() error on FD: ") + StringUtils::to_string(current_fd));
+					// A client socket that cannot accept a response is no longer
+					// usable.  Remove it immediately: merely logging the failure
+					// leaves a dead descriptor in poll() until the timeout expires.
+					// Do not inspect errno here; the project subject forbids it after
+					// send()/read()/write()/recv().
+					Logger::error(std::string("send() returned a non-positive value on FD: ")
+						+ StringUtils::to_string(current_fd));
+					cancelCgi(conn);
+					delete conn;
+					_connections.erase(current_fd);
+					_poller.removeFd(current_fd);
+					continue;
 				}
 
 				if (!conn->hasPendingResponse())

@@ -36,6 +36,7 @@ class EventLoop
         std::vector<ServerConfig>   _servers;
         std::map<int, CgiState> _cgi_states;
         std::map<int, int> _cgi_write_to_read;
+		std::vector<pid_t> _cancelled_cgi_pids;
 
         EventLoop(const EventLoop& other);
         EventLoop& operator=(const EventLoop& other);
@@ -44,8 +45,11 @@ class EventLoop
         size_t getMaxBodySizeForEndpoint(const std::string& host, int port) const;
         void queueResponse(Connection* connection, const HttpResponse& response);
         bool hasActiveCgi(Connection* connection) const;
+		bool hasStartedCgiResponse(Connection* connection) const;
+		void scheduleCgiReap(pid_t pid);
         void cancelCgi(Connection* connection);
 		void reapFinishedCgis();
+		void reapCancelledCgis();
         static bool writeAll(int fd, const std::string& data);
         static bool parseCgiOutput(const std::string& rawOutput, HttpResponse& response);
 

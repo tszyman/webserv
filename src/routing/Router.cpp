@@ -155,7 +155,10 @@ Router::Router() {}
 
 bool Router::isCgiRequest(const RequestParser& request) const
 {
-	if (request.getMethod() != "POST")
+	// CGI endpoints are valid for both methods required by the subject.  POST
+	// requests may be started early by EventLoop so their body can be streamed
+	// to CGI; GET requests reach the same handler once parsing is complete.
+	if (request.getMethod() != "GET" && request.getMethod() != "POST")
 		return false;
 	const LocationConfig* location = matchLocation(request.getPath());
 	if (location == NULL || location->getCgiExtension().empty()
@@ -308,7 +311,7 @@ bool Router::handleCgi(const RequestParser& request, const std::string& physical
 {
 	if (location == NULL)
 		return false;
-	if (request.getMethod() != "POST")
+	if (request.getMethod() != "GET" && request.getMethod() != "POST")
 		return false;
 	if (location->getCgiExtension().empty() || location->getCgiExecutable().empty())
 		return false;
